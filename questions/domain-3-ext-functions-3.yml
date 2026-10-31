@@ -1,0 +1,382 @@
+# 分野 3 追加問題（3 周目）: Functions のトリガー・バインド・Durable Functions（3.3）
+
+- id: s-func-durable-activity-retry
+  objective: "3.3"
+  type: dropdown
+  difficulty: 3
+  tags: [functions, durable-functions, retry, python]
+  question: |
+    オーケストレーターから LLM で要約するアクティビティ `summarize` を呼びます。一時的なエラーに備えて、5 秒間隔で最大 3 回まで再試行させたいです。コードを完成させてください。
+  language: python
+  template: |
+    @app.orchestration_trigger(context_name="context")
+    def summarize_all(context: df.DurableOrchestrationContext):
+        docs = context.get_input()
+        retry = df.{{1}}(first_retry_interval_in_milliseconds=5000,
+                               max_number_of_attempts=3)
+        tasks = [context.{{2}}("summarize", retry, d) for d in docs]
+        results = yield context.{{3}}(tasks)
+        return results
+  blanks:
+    "1":
+      options: ["RetryOptions", "RetryPolicy", "ExponentialBackoff", "Retry"]
+      answer: "RetryOptions"
+    "2":
+      options: ["call_activity_with_retry", "call_activity", "call_sub_orchestrator", "start_new"]
+      answer: "call_activity_with_retry"
+    "3":
+      options: ["task_all", "task_any", "wait_for_external_event", "create_timer"]
+      answer: "task_all"
+  explanation: |
+    Durable Functions では、アクティビティの再試行をオーケストレーターから `call_activity_with_retry` と `RetryOptions` で宣言的に指定できます。再試行の状態は履歴に記録されるので、途中でホストが再起動しても回数が正しく引き継がれます。
+    複数のアクティビティを並列に実行して全部の完了を待つのは `task_all`（ファンアウト／ファンイン）、最初に終わったものを待つのは `task_any` です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-error-handling
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-cloud-backup
+
+- id: s-func-durable-approval
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable-functions, human-interaction]
+  question: |
+    AI が作成した回答の下書きを担当者が承認してから送信するワークフローを Durable Functions で作ります。担当者が 24 時間以内に承認しなければ、自動でエスカレーションします。オーケストレーターの実装として最も適切なものはどれですか。
+  options:
+    - "`wait_for_external_event(\"Approval\")` と、24 時間後の `create_timer()` を `task_any` で待ち、先に完了した方で分岐する（承認された場合はタイマーを取り消す）"
+    - "オーケストレーターの中で `time.sleep(86400)` してから、データベースの承認フラグを確認する"
+    - "アクティビティ関数の中で 24 時間ループして承認を待つ"
+    - "Timer トリガーの関数で 1 分ごとに全件の承認状態を確認する"
+  answer: A
+  explanation: |
+    **外部イベント**（担当者の承認を `raise_event` で送る）と**永続タイマー**を `task_any` で競わせるのが、人の操作を待つパターンの定石です。待機中のオーケストレーターはメモリから外れて課金されず、ホストが再起動しても状態が保たれます。
+    オーケストレーター内で `sleep` すると決定的でなくなり、アクティビティで長時間待つとタイムアウトやコストの問題が起きます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-phone-verification
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-external-events
+
+- id: s-func-durable-status
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, durable-functions, async-http]
+  question: |
+    HTTP でレポート生成（数分かかる）を受け付ける関数を、Durable Functions で作りました。クライアントは要求を送ったあと、完了したかどうかを確認して結果を受け取りたいです。HTTP の開始関数が返すべき応答として最も適切なものはどれですか。
+  options:
+    - "`client.create_check_status_response(req, instance_id)` で、状態確認用の URL（`statusQueryGetUri` など）を含む 202 Accepted を返す"
+    - "オーケストレーションの完了まで待ってから 200 を返す"
+    - "インスタンス ID を返さずに 204 を返す"
+    - "オーケストレーションを開始せずに、レポートを同期で作って返す"
+  answer: A
+  explanation: |
+    これは**非同期 HTTP API** のパターンです。開始関数はオーケストレーションを開始してすぐに 202 と状態確認の URL（`Location` ヘッダーにも入る）を返し、クライアントはその URL をポーリングして、完了したら出力を受け取ります。HTTP 要求のタイムアウト（約 230 秒）を気にせずに長い処理を扱えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-http-features
+
+- id: s-func-durable-continue-as-new
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable-functions, eternal-orchestration]
+  question: |
+    1 時間ごとに「新しい文書を取り込む → 待つ」を繰り返すオーケストレーションを、`while True` のループと `create_timer` で実装しました。数週間後、オーケストレーションの再生（リプレイ）がどんどん遅くなり、ストレージの使用量も増えています。最も適切な修正はどれですか。
+  options:
+    - "1 回分の処理の最後で `context.continue_as_new()` を呼び、履歴をリセットして新しい世代として再開する（永続的なオーケストレーション）"
+    - "タイマーの間隔を 1 分にする"
+    - "アクティビティを同期関数にする"
+    - "ホストのメモリを増やす"
+  answer: A
+  explanation: |
+    オーケストレーターは履歴を最初から再生して状態を復元するため、無限ループでは履歴が増え続け、再生が遅くなります。`continue_as_new` を使うと、履歴を切り捨てて新しい入力で最初からやり直すので、履歴の大きさが一定に保たれます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-eternal-orchestrations
+
+- id: s-func-durable-replay-logging
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable-functions, replay, logging]
+  question: |
+    オーケストレーターの中に `logging.info("要約を開始")` を書いたところ、1 回の実行なのに同じログが何度も出力されます。原因と対処として正しいものはどれですか。
+  options:
+    - "オーケストレーターはアクティビティが完了するたびに最初から再生されるため。再生中はログを出さないよう `if not context.is_replaying:` で囲む"
+    - "ログのレベルが低すぎるため。`logging.warning` にする"
+    - "アクティビティが重複して実行されているため。アクティビティを削除する"
+    - "Application Insights のサンプリングの不具合なので無視してよい"
+  answer: A
+  explanation: |
+    オーケストレーターは、アクティビティの結果を受け取るたびに**履歴を使って最初から再実行（再生）**されます。再生中もオーケストレーターのコードは実行されるため、副作用のあるコード（ログ、外部呼び出し）は重複します。ログは `is_replaying` で抑止し、外部呼び出しはアクティビティに移します。アクティビティ自体は履歴の結果が使われるので、再生では再実行されません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-code-constraints
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-diagnostics
+
+- id: s-func-durable-throttle
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable-functions, fan-out, throttling]
+  question: |
+    5,000 個のチャンクの埋め込みをファンアウトで並列に作ると、埋め込み API のレート制限（429）に当たります。オーケストレーターのコードを大きく変えずに、同時に実行されるアクティビティの数を抑える方法として最も適切なものはどれですか。
+  options:
+    - "`host.json` の `durableTask` で `maxConcurrentActivityFunctions` を設定し、インスタンスあたりの同時実行数を制限する（必要に応じて最大インスタンス数も制限する）"
+    - "`task_all` を `task_any` に変える"
+    - "オーケストレーターを 5,000 個に分ける"
+    - "アクティビティの中で `time.sleep` を入れる"
+  answer: A
+  explanation: |
+    `maxConcurrentActivityFunctions` は、1 つのインスタンスで同時に実行するアクティビティの数を制限します。全体の同時実行数は「インスタンス数 × この値」になるので、関数アプリの最大インスタンス数とあわせて調整します。オーケストレーター側でチャンクを小分けにして順番に `task_all` する方法もあります。
+    `task_any` にすると、最初の 1 つが終わった時点で先に進んでしまいます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-perf-and-scale
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-bindings#hostjson-settings
+
+- id: s-func-durable-entity
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable-entities]
+  question: |
+    テナントごとの「今月の LLM トークン使用量」を、多数の関数から同時に加算します。データベースを使わずに、同時更新でも数がずれない仕組みを Durable Functions で作りたい場合、最も適切なものはどれですか。
+  options:
+    - "テナント ID をキーにした Durable エンティティを作り、`add` 操作で加算する（エンティティへの操作は 1 つずつ順番に処理される）"
+    - "オーケストレーターのグローバル変数に加算する"
+    - "アクティビティ関数の静的変数に加算する"
+    - "Timer トリガーで 1 時間ごとに集計する"
+  answer: A
+  explanation: |
+    **Durable エンティティ**は、キーごとの小さな状態とその操作を持ち、同じエンティティへの操作は 1 つずつ順に実行されるため、ロックなしで安全にカウンターなどを更新できます。状態は永続化されます。
+    関数のグローバル変数や静的変数は、インスタンスごとに別で、再起動で消えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-entities
+
+- id: s-func-eventhub-checkpoint
+  objective: "3.3"
+  type: yesno
+  difficulty: 3
+  tags: [functions, event-hubs, checkpoint, retry]
+  question: |
+    Event Hubs トリガーの関数（`cardinality="many"`）で、バッチ内の 1 件の処理中に例外が発生しました。再試行ポリシーは設定していません。次の記述が正しいかを答えてください。
+  statements:
+    - text: "関数が例外で終わっても、そのバッチのチェックポイントは進み、同じイベントは再配信されない。"
+      answer: true
+    - text: "Service Bus のように、失敗したイベントが自動で配信不能キューに移される。"
+      answer: false
+    - text: "失敗したイベントを失わないためには、関数の中でイベントごとに例外を捕捉し、失敗したものを別の保存先（キューなど）に退避するとよい。"
+      answer: true
+  explanation: |
+    Event Hubs はストリームなので、トリガーは関数の成否にかかわらずチェックポイントを進め、1 つのイベントのためにパーティション全体が止まらないようにします。配信不能キューの仕組みもありません。失敗したイベントはコードで捕捉して退避するか、再試行ポリシー（Event Hubs トリガーでサポート）で一時的なエラーに備えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reliable-event-processing
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-error-pages
+
+- id: s-func-route-template
+  objective: "3.3"
+  type: dropdown
+  difficulty: 2
+  tags: [functions, http-trigger, routing, python]
+  question: |
+    `GET /api/tenants/{tenant}/docs/{id}` で、`id` が整数のときだけ一致する HTTP 関数を作ります。コードを完成させてください。
+  language: python
+  template: |
+    @app.route(route="tenants/{tenant}/docs/{{1}}", methods=["GET"])
+    def get_doc(req: func.HttpRequest) -> func.HttpResponse:
+        tenant = req.{{2}}["tenant"]
+        doc_id = int(req.route_params["id"])
+        if "include" in req.{{3}}:
+            ...
+  blanks:
+    "1":
+      options: ["{id:int}", "{int:id}", "<id:int>", ":id"]
+      answer: "{id:int}"
+    "2":
+      options: ["route_params", "params", "headers", "get_json()"]
+      answer: "route_params"
+    "3":
+      options: ["params", "route_params", "form", "files"]
+      answer: "params"
+  explanation: |
+    ルート テンプレートでは `{名前:制約}` の形で型の制約を付けられ、一致しない要求は 404 になります。パスの値は `route_params`、クエリ文字列（`?include=...`）は `params` から取得します。既定のプレフィックス `api/` は `host.json` で変更できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-http-webhook-trigger
+
+- id: s-func-cosmos-output-upsert
+  objective: "3.3"
+  type: yesno
+  difficulty: 3
+  tags: [functions, cosmos-db, output-binding]
+  question: |
+    Python の関数で、Cosmos DB の出力バインド（`@app.cosmos_db_output`）を使って、要約結果のドキュメントを保存しています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "同じ `id`（とパーティション キーの値）のドキュメントがすでにあれば、出力バインドはそのドキュメントを置き換える（upsert）。"
+      answer: true
+    - text: "出力バインドで、`_etag` を条件にした楽観的同時実行制御（if-match）を指定できる。"
+      answer: false
+    - text: "条件付きの更新や部分更新（patch）が必要な場合は、バインドではなく SDK のクライアントを使う。"
+      answer: true
+  explanation: |
+    出力バインドは手軽にドキュメントを書き込める反面、操作は upsert に限られ、条件付きの書き込みや patch、トランザクション バッチなどは指定できません。こうした細かい制御が必要な処理では、SDK のクライアント（関数の外で 1 回だけ作成して再利用）を使います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-output
+
+- id: s-func-blob-sdk-type
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, blob, sdk-type-bindings, python]
+  question: |
+    Blob トリガーの関数（Python）で、500 MB の動画ファイルから音声だけを取り出して処理します。トリガーの引数を `func.InputStream` にして `read()` すると、メモリ不足で失敗します。最も適切な改善はどれですか。
+  options:
+    - "SDK 型バインド（`azurefunctions-extensions-bindings-blob`）で引数を `BlobClient`（または `StorageStreamDownloader`）として受け取り、必要な部分をストリームで少しずつ読む"
+    - "関数のタイムアウトを延ばす"
+    - "Blob トリガーを Timer トリガーに変える"
+    - "Blob を Base64 にしてキューのメッセージに入れる"
+  answer: A
+  explanation: |
+    Python の SDK 型バインドを使うと、バインドの引数として Azure SDK のクライアント（`BlobClient` など）を受け取れます。ファイル全体をメモリに読み込まず、範囲を指定したダウンロードやストリームでの読み取りができるので、大きなファイルを扱えます。
+    キューのメッセージにはサイズ上限があり、大きなデータの受け渡しには向きません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference-python#sdk-type-bindings
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-storage-blob-trigger
+
+- id: s-func-python-async
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, python, async, concurrency]
+  question: |
+    Python の HTTP 関数を `async def` にして LLM の API を呼んでいますが、HTTP クライアントには同期版の `requests` を使っています。同時要求が増えると、1 インスタンスで 1 件ずつしか処理されていないように遅くなります。原因と対処として最も適切なものはどれですか。
+  options:
+    - "`async def` の関数はイベント ループ上で動くため、同期の `requests` がループをブロックしている。`httpx.AsyncClient` や `aiohttp` などの非同期クライアントで `await` する"
+    - "`async def` を使うと関数が 1 インスタンスに 1 つしか動かない仕様なので、同期関数に戻すしかない"
+    - "LLM の API のレート制限が原因なので、コードは関係ない"
+    - "関数のメモリを増やせば解決する"
+  answer: A
+  explanation: |
+    Python のワーカーでは、`async def` の関数はイベント ループで実行され、同期関数はスレッド プールで実行されます。`async def` の中でブロッキングな I/O を呼ぶと、イベント ループ全体が止まり、他の要求を並行して処理できなくなります。非同期関数では非同期のクライアントを使い、同期のライブラリしかない場合は同期関数（スレッド プール）にします。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/python-scale-performance-reference
+
+- id: s-func-eventgrid-trigger-code
+  objective: "3.3"
+  type: dropdown
+  difficulty: 2
+  tags: [functions, event-grid, python]
+  question: |
+    Event Grid トリガーの関数で、Blob の作成イベントから Blob の URL を取り出すコードを完成させてください（Python v2 モデル）。
+  language: python
+  template: |
+    @app.{{1}}(arg_name="event")
+    def on_blob_created(event: func.{{2}}):
+        if event.event_type != "Microsoft.Storage.BlobCreated":
+            return
+        data = event.{{3}}()
+        blob_url = data["url"]
+  blanks:
+    "1":
+      options: ["event_grid_trigger", "event_hub_message_trigger", "blob_trigger", "route"]
+      answer: "event_grid_trigger"
+    "2":
+      options: ["EventGridEvent", "EventHubEvent", "InputStream", "HttpRequest"]
+      answer: "EventGridEvent"
+    "3":
+      options: ["get_json", "get_body", "read", "json"]
+      answer: "get_json"
+  explanation: |
+    Event Grid トリガーは `@app.event_grid_trigger` で定義し、引数の型は `func.EventGridEvent` です。`event_type`、`subject`、`id` などのプロパティと、`get_json()` でイベントの `data` を取得できます。Blob の作成イベントの `data` には `url`、`contentType`、`contentLength` などが入っています。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-event-grid-trigger
+    - https://learn.microsoft.com/azure/event-grid/event-schema-blob-storage
+
+- id: s-func-blob-receipts
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, blob-trigger, receipts]
+  question: |
+    （ポーリング型の）Blob トリガーの関数のバグを直したので、すでに処理済みの Blob `docs/a1.pdf` をもう一度処理させたいです。Blob の内容は変わっていません。関数を再デプロイしても、この Blob は再処理されません。理由として正しいものはどれですか。
+  options:
+    - "Blob トリガーは処理済みの Blob を「受信確認（receipt）」としてホストのストレージ（`azure-webjobs-hosts` コンテナー）に記録しており、同じ Blob（同じ ETag）は再処理しない。受信確認を削除するか、Blob を更新する"
+    - "Blob トリガーは 1 つの Blob を 1 年に 1 回しか処理しない"
+    - "Blob のアクセス層が Cool だから"
+    - "再デプロイすると関数のキーが変わるから"
+  answer: A
+  explanation: |
+    Blob トリガーは、同じ Blob を二重に処理しないよう、関数ごと・Blob の ETag ごとに受信確認を `azure-webjobs-hosts` に保存します。Blob を書き換える（ETag が変わる）と再びトリガーされます。意図的に再処理するには、その受信確認を削除します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-storage-blob-trigger
+
+- id: s-func-sb-session-trigger
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, service-bus, sessions]
+  question: |
+    セッションを有効にした Service Bus キュー（会話 ID がセッション ID）のメッセージを、会話ごとに順番どおりに処理する関数を作ります。Service Bus トリガーで必要な設定はどれですか（Python v2 モデル）。
+  options:
+    - "`@app.service_bus_queue_trigger(..., is_sessions_enabled=True)` を指定する"
+    - "`cardinality=\"many\"` を指定すれば自動で順序が保証される"
+    - "`host.json` で `maxConcurrentCalls` を 0 にする"
+    - "セッションが有効なキューは関数のトリガーとして使えない"
+  answer: A
+  explanation: |
+    セッションを有効にしたエンティティから受信するには、トリガーでセッションを有効にする設定（`is_sessions_enabled` / `IsSessionsEnabled`）が必要です。関数はセッションをロックして受信し、同じセッションのメッセージを順に処理します。同時に処理するセッション数は `host.json` の `maxConcurrentSessions` で調整できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-service-bus-trigger
+
+- id: s-func-timer-past-due
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, timer-trigger]
+  question: |
+    毎日 02:00 に前日分のレポートを作る Timer トリガーの関数があります。メンテナンスでアプリが停止していて 02:00 の実行が遅れた場合に、それを検知してログに残したいです。どのプロパティを確認しますか。
+  options:
+    - "タイマーの引数の `past_due`（予定時刻を過ぎてから実行された場合に true）"
+    - "`run_on_startup`"
+    - "`use_monitor`"
+    - "`schedule_status.next` が過去の日時かどうか"
+  answer: A
+  explanation: |
+    Timer トリガーの引数（`func.TimerRequest`）の `past_due` は、予定の時刻より遅れて実行されたときに true になります。遅れて実行されたことを記録したり、対象期間の計算を調整したりできます。`use_monitor`（既定で有効）は、停止中に予定時刻を過ぎた実行を、再開後に 1 回実行するための仕組みです。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-timer
+
+- id: s-func-binding-or-sdk
+  objective: "3.3"
+  type: match
+  difficulty: 3
+  tags: [functions, bindings, sdk]
+  question: |
+    要件と、より適した実装方法を対応付けてください。
+  pairs:
+    - left: "キューのメッセージを受けて、Blob に 1 ファイルを書き出すだけ"
+      right: "入力・出力バインドを使う（コードが短く、接続の管理も任せられる）"
+    - left: "Cosmos DB で、ETag を条件にした更新と、失敗時の再読み込みが必要"
+      right: "SDK のクライアントを使う（関数の外で作成して再利用する）"
+    - left: "書き込み先のコンテナー名が、処理の途中の計算結果で決まる"
+      right: "SDK のクライアントを使う（または実行時のバインドを使う）"
+  distractors:
+    - "関数を使わず、VM にスクリプトを置く"
+  explanation: |
+    バインドは定型的な読み書きを簡潔にしますが、操作の種類や条件は限られます。条件付き書き込み、トランザクション、細かな再試行、動的な書き込み先などが必要な場合は SDK を使います。SDK のクライアントは関数の外（モジュールのレベル）で 1 回だけ作成し、呼び出し間で再利用します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-triggers-bindings
+    - https://learn.microsoft.com/azure/azure-functions/manage-connections
+
+- id: s-func-durable-or-queue
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable-functions, service-bus, design]
+  question: |
+    「PDF の取り込み → チャンク化 → 埋め込み（並列）→ すべて完了したら索引を切り替えて通知」という処理を作ります。途中の状態（どのチャンクが終わったか）を自分で管理するコードを書きたくありません。最も適切な構成はどれですか。
+  options:
+    - "Durable Functions のオーケストレーターで、アクティビティを順番に呼び、埋め込みはファンアウト／ファンインで並列化する"
+    - "各段階を別々の Service Bus キューでつなぎ、全チャンクの完了はデータベースのカウンターで自前で判定する"
+    - "1 つの HTTP 関数ですべての処理を同期で行う"
+    - "Timer トリガーで 1 分ごとに進捗を確認する"
+  answer: A
+  explanation: |
+    複数の段階と「全部終わったら次へ」という集約を含むワークフローは、Durable Functions のオーケストレーターで書くと、状態の保存・再試行・再開をフレームワークが担ってくれます。キューだけでつなぐ方法でも実現できますが、完了の判定や失敗時の扱いを自分で実装する必要があります。
+    1 つの HTTP 関数で同期処理すると、タイムアウトや途中失敗からの再開が問題になります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-overview
