@@ -1,0 +1,407 @@
+# 分野 4 追加問題（3 周目）: App Configuration（4.2）
+
+- id: m-appcfg-json-value
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, content-type, json]
+  question: |
+    RAG の検索設定（`topK`、`minScore`、`filters` の配列など）を、1 つのキー `RagApi:Search` にまとめて JSON で保存しました。アプリ（Python のプロバイダー）では `config["RagApi:Search"]` が文字列として返ってしまい、毎回 `json.loads` が必要です。どうすれば、構造化された値として読み込めますか。
+  options:
+    - "キーと値のコンテンツ タイプを `application/json` にして保存する（プロバイダーが JSON として解析する）"
+    - "キーの名前の末尾に `.json` を付ける"
+    - "ラベルに `json` を指定する"
+    - "値を Base64 にして保存する"
+  answer: A
+  explanation: |
+    App Configuration の値は基本的に文字列ですが、コンテンツ タイプを JSON（`application/json`）にすると、プロバイダーが値を JSON として解析し、構造化されたデータとして扱えます。ポータルや CLI（`--content-type application/json`）で設定できます。キー名やラベルは解析方法に影響しません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-leverage-json-content-type
+
+- id: m-appcfg-variant-flags
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, feature-flags, variants, experimentation]
+  question: |
+    回答生成のプロンプトを 3 種類（現行・簡潔版・詳細版）用意し、ユーザーを 80% / 10% / 10% に割り振って比較したいです。同じユーザーには常に同じプロンプトを使い、プロンプトの文面もコードではなく構成で管理したいです。最も適切な機能はどれですか。
+  options:
+    - "バリアント機能フラグで 3 つのバリアント（値にプロンプトの設定を持たせる）を定義し、割り当て（allocation）で割合を指定する"
+    - "オン／オフの機能フラグを 3 つ作り、それぞれに 33% の割合フィルターを付ける"
+    - "ラベルを 3 つ作り、アプリをランダムに再起動する"
+    - "スナップショットを 3 つ作る"
+  answer: A
+  explanation: |
+    **バリアント機能フラグ**は、オン／オフだけでなく複数のバリアント（それぞれ値を持てる）を定義し、ユーザーやグループ、割合で割り当てられます。割り当てはターゲット（ユーザー ID）に基づいて決まるので、同じユーザーには同じバリアントが使われます。テレメトリと組み合わせれば、バリアントごとの効果を比較できます。
+    オン／オフのフラグを 3 つ並べると、組み合わせが重複したり、ユーザーごとに一貫しなかったりします。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-feature-management#variant-feature-flags
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-variant-feature-flags
+
+- id: m-appcfg-percentage-vs-targeting
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, feature-flags, percentage-filter, targeting]
+  question: |
+    新しいチャット UI を、割合フィルター（Microsoft.Percentage、50%）付きの機能フラグで半数に公開しました。すると「画面を再読み込みするたびに新旧の UI が入れ替わる」という苦情が出ました。最も適切な修正はどれですか。
+  options:
+    - "ターゲット フィルターに変更し、既定の割合を 50% にする（ユーザー ID に基づいて、同じユーザーには同じ結果になる）"
+    - "割合フィルターの値を 100% にする"
+    - "動的リフレッシュの間隔を長くする"
+    - "機能フラグを 2 つ作る"
+  answer: A
+  explanation: |
+    割合フィルターは**評価のたびにランダム**に有効・無効を決めるので、同じユーザーでも結果が変わります。ユーザー単位で一貫した体験が必要なら、ターゲット フィルターの既定の割合（default rollout percentage）を使います。ターゲット フィルターはユーザー ID（とフラグ名）から決定的に割り当てるので、同じユーザーには常に同じ結果になります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-feature-filters
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-targetingfilter
+
+- id: m-appcfg-cli-ops
+  objective: "4.2"
+  type: dropdown
+  difficulty: 2
+  tags: [app-configuration, azure-cli]
+  question: |
+    デプロイ後のスクリプトで、本番（ラベル `prod`）の `RagApi:Search:TopK` を 8 に変更し、機能フラグ `Reranker` を有効にします。Entra ID の資格情報で操作します。コマンドを完成させてください。
+  language: bash
+  template: |
+    az appconfig kv {{1}} --endpoint https://appcs-rag.azconfig.io --auth-mode {{2}} \
+      --key RagApi:Search:TopK --value 8 --label prod --yes
+
+    az appconfig {{3}} enable --endpoint https://appcs-rag.azconfig.io --auth-mode login \
+      --feature Reranker --label prod --yes
+  blanks:
+    "1":
+      options: ["set", "add", "update", "put"]
+      answer: "set"
+    "2":
+      options: ["login", "key", "anonymous", "managedidentity"]
+      answer: "login"
+    "3":
+      options: ["feature", "flag", "featureflag", "kv"]
+      answer: "feature"
+  explanation: |
+    キーと値の作成・更新は `az appconfig kv set`、機能フラグの有効化は `az appconfig feature enable` です。`--auth-mode login` を指定すると、アクセス キーではなく `az login` の Entra ID の資格情報で操作します（その ID に App Configuration Data Owner が必要）。既定の `key` モードは、アクセス キーを無効にしたストアでは使えません。
+  refs:
+    - https://learn.microsoft.com/cli/azure/appconfig/kv
+    - https://learn.microsoft.com/cli/azure/appconfig/feature
+
+- id: m-appcfg-arm-passthrough
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, bicep, access-keys, arm]
+  question: |
+    App Configuration のアクセス キー認証を無効にしたところ、Bicep で `Microsoft.AppConfiguration/configurationStores/keyValues` リソースとしてキーと値を作成していたデプロイが失敗するようになりました。アクセス キーを再度有効にせずに解決する方法として、最も適切なものはどれですか。
+  options:
+    - "ストアの Azure Resource Manager 認証モードをパススルー（`dataPlaneProxy.authenticationMode: Pass-through`）にし、デプロイする ID に App Configuration Data Owner を付与する"
+    - "Bicep のデプロイ ID に Owner を付与する"
+    - "キーと値をすべて Key Vault に移す"
+    - "App Configuration を Free 層にする"
+  answer: A
+  explanation: |
+    ARM テンプレートでキーと値を操作するとき、既定（ローカル）の ARM 認証モードでは内部的にアクセス キーが使われるため、アクセス キーを無効にすると失敗します。**パススルー**モードにすると、デプロイする ID 自身の Entra ID の権限でデータ プレーンにアクセスするので、その ID にデータ ロールを付与すれば動作します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/quickstart-deployment-overview#azure-resource-manager-authentication-mode
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-disable-access-key-authentication
+
+- id: m-appcfg-k8s-provider
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, aks, kubernetes-provider]
+  question: |
+    AKS 上の既存のアプリは、設定を ConfigMap からファイルとして読み込む作りで、コードを変更できません。この設定を App Configuration で一元管理し、変更も自動で反映させたい場合、最も適切な方法はどれですか。
+  options:
+    - "Azure App Configuration の Kubernetes プロバイダーを導入し、App Configuration のキーと値から ConfigMap（Key Vault 参照は Secret）を生成・同期させる"
+    - "アプリのコードに App Configuration の SDK を組み込む"
+    - "CI のたびに `kubectl create configmap` を手作業で実行する"
+    - "ConfigMap に App Configuration の接続文字列を書く"
+  answer: A
+  explanation: |
+    App Configuration の **Kubernetes プロバイダー**は、カスタム リソースで指定したキーと値（とラベル）を ConfigMap に、Key Vault 参照を Secret に同期します。アプリは従来どおり ConfigMap や Secret を読むだけでよく、コードの変更は不要です。プロバイダーはワークロード ID などで App Configuration に認証できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/quickstart-azure-kubernetes-service
+    - https://learn.microsoft.com/azure/azure-app-configuration/reference-kubernetes-provider
+
+- id: m-appcfg-feature-manager-code
+  objective: "4.2"
+  type: dropdown
+  difficulty: 3
+  tags: [app-configuration, feature-management, python, targeting]
+  question: |
+    App Configuration から機能フラグを読み込み、ログイン中のユーザーとその所属グループで `Reranker` が有効かを判定する Python のコードを完成させてください。
+  language: python
+  template: |
+    from azure.appconfiguration.provider import load
+    from featuremanagement import FeatureManager, TargetingContext
+
+    config = load(endpoint=ENDPOINT, credential=credential,
+                  {{1}}=True)
+    feature_manager = {{2}}(config)
+
+    def use_reranker(user_id: str, groups: list[str]) -> bool:
+        return feature_manager.is_enabled(
+            "Reranker", {{3}}(user_id=user_id, groups=groups))
+  blanks:
+    "1":
+      options: ["feature_flag_enabled", "feature_flags", "load_feature_flags", "enable_features"]
+      answer: "feature_flag_enabled"
+    "2":
+      options: ["FeatureManager", "FeatureFlagClient", "AzureAppConfigurationClient", "TargetingFilter"]
+      answer: "FeatureManager"
+    "3":
+      options: ["TargetingContext", "dict", "UserContext", "FeatureContext"]
+      answer: "TargetingContext"
+  explanation: |
+    Python のプロバイダーは、既定では機能フラグを読み込まないので、`feature_flag_enabled=True` を指定します。読み込んだ構成を `featuremanagement` パッケージの `FeatureManager` に渡し、ターゲット フィルターの評価にはユーザー ID とグループを `TargetingContext` で渡します。フラグの変更も取り込みたい場合は、`feature_flag_refresh_enabled=True` とリフレッシュの呼び出しも行います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/quickstart-feature-flag-python
+    - https://learn.microsoft.com/azure/azure-app-configuration/feature-management-python-reference
+
+- id: m-appcfg-flags-not-loaded
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, feature-flags, python]
+  question: |
+    ポータルで機能フラグ `Beta` を有効にしましたが、Python のアプリで `FeatureManager(config).is_enabled("Beta")` が常に False です。`load()` には `endpoint` と `credential` しか指定していません。最も可能性の高い原因はどれですか。
+  options:
+    - "プロバイダーが機能フラグを読み込んでいない。`load()` に `feature_flag_enabled=True` を指定する"
+    - "機能フラグはキャッシュされるため、24 時間待つ必要がある"
+    - "機能フラグはアクセス キーでしか読み込めない"
+    - "`Beta` という名前は予約されている"
+  answer: A
+  explanation: |
+    機能フラグは、キー `.appconfig.featureflag/<名前>` として保存される特別なキーと値で、プロバイダーは既定では読み込みません。`feature_flag_enabled=True` で読み込み、必要なら `feature_flag_selectors` でラベルなどを絞り込みます。存在しないフラグは無効として評価されるため、エラーにならずに False が返ります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/reference-python-provider
+
+- id: m-appcfg-refresh-code
+  objective: "4.2"
+  type: dropdown
+  difficulty: 3
+  tags: [app-configuration, dynamic-refresh, python]
+  question: |
+    センチネル キー `RagApi:Sentinel` が変わったときだけ、すべての構成を読み直すようにします。確認は最短でも 60 秒間隔にします。Python のコードを完成させてください。
+  language: python
+  template: |
+    from azure.appconfiguration.provider import load, WatchKey
+
+    config = load(endpoint=ENDPOINT, credential=credential,
+                  refresh_on=[{{1}}("RagApi:Sentinel")],
+                  {{2}}=60)
+
+    @app.middleware("http")
+    async def refresh_config(request, call_next):
+        config.{{3}}()
+        return await call_next(request)
+  blanks:
+    "1":
+      options: ["WatchKey", "SettingSelector", "Sentinel", "RefreshKey"]
+      answer: "WatchKey"
+    "2":
+      options: ["refresh_interval", "refresh_timeout", "cache_expiration", "poll_seconds"]
+      answer: "refresh_interval"
+    "3":
+      options: ["refresh", "reload", "update", "load"]
+      answer: "refresh"
+  explanation: |
+    `refresh_on` に監視するキー（`WatchKey`）を指定し、`refresh_interval`（秒）でその確認の最短間隔を決めます。Python のプロバイダーは自動ではリフレッシュしないため、要求の処理の中などで `config.refresh()` を呼びます。間隔が経過していなければ、`refresh()` は何もしないので、毎要求で呼んでもストアへの要求は増えません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/enable-dynamic-configuration-python
+    - https://learn.microsoft.com/azure/azure-app-configuration/reference-python-provider
+
+- id: m-appcfg-kill-switch
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, feature-flags, operations]
+  question: |
+    外部の LLM プロバイダーで大規模な障害が起きたときに、運用担当者がすぐに「生成 AI の機能を止めて、定型の FAQ 回答だけを返すモード」に切り替えられるようにしたいです。コードの再デプロイやアプリの再起動はしたくありません。最も適切な方法はどれですか。
+  options:
+    - "機能フラグ（キル スイッチ）`GenAI` を用意し、アプリは評価結果で処理を切り替える。動的リフレッシュの間隔を短めにしておく"
+    - "アプリ設定の環境変数を変更する"
+    - "LLM の API キーを Key Vault で無効にする"
+    - "Container Apps のレプリカ数を 0 にする"
+  answer: A
+  explanation: |
+    機能フラグを**キル スイッチ**として使うと、運用担当者がポータルや CLI で無効にするだけで、リフレッシュ後に全インスタンスの動作が切り替わります。環境変数の変更は再起動（新しいリビジョン）を伴います。API キーを無効にすると、エラー処理に頼った乱暴な切り替えになります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-feature-management
+
+- id: m-appcfg-appservice-reference
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, app-service, references]
+  question: |
+    App Service のアプリは、環境変数から設定を読むだけで、App Configuration の SDK を組み込んでいません。コードを変えずに、アプリ設定 `SEARCH_TOP_K` の値を App Configuration のキー `RagApi:Search:TopK`（ラベル `prod`）から取得させたいです。最も適切な方法はどれですか。
+  options:
+    - "アプリ設定の値を `@Microsoft.AppConfiguration(Endpoint=https://appcs-rag.azconfig.io; Key=RagApi:Search:TopK; Label=prod)` にし、アプリのマネージド ID に App Configuration Data Reader を付与する"
+    - "アプリ設定の値を `@Microsoft.KeyVault(SecretUri=https://appcs-rag.azconfig.io/RagApi:Search:TopK)` にする"
+    - "アプリ設定に App Configuration の接続文字列を入れるだけでよい"
+    - "App Service ではこの方法は使えないので、SDK を組み込むしかない"
+  answer: A
+  explanation: |
+    App Service と Azure Functions のアプリ設定は、Key Vault 参照と同じように **App Configuration 参照**（`@Microsoft.AppConfiguration(...)`）を使えます。プラットフォームがアプリの ID で値を取得して環境変数に設定するので、コードの変更は不要です。値はプラットフォームによって定期的に再取得されますが、変更をすぐに反映したいなら SDK の動的リフレッシュの方が適しています。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/app-service-configuration-references
+
+- id: m-appcfg-kvref-flow
+  objective: "4.2"
+  type: order
+  difficulty: 3
+  tags: [app-configuration, key-vault-reference]
+  question: |
+    App Configuration に Key Vault 参照 `RagApi:OpenAIKey` を保存し、アプリ（プロバイダー使用、マネージド ID）がその値を使います。値が解決されるまでの流れを正しい順に並べてください。
+  items:
+    - "アプリが自分のマネージド ID で App Configuration からキーと値を読み込む"
+    - "プロバイダーが、コンテンツ タイプから `RagApi:OpenAIKey` が Key Vault 参照であると判断する"
+    - "アプリ（プロバイダー）が自分のマネージド ID で、参照先の Key Vault からシークレットの値を取得する"
+    - "アプリのコードは `config[\"RagApi:OpenAIKey\"]` で解決済みの値を使う"
+  distractors:
+    - "App Configuration がシークレットの値を Key Vault から取得してアプリに返す"
+  explanation: |
+    App Configuration は Key Vault 参照（シークレットの URI）を保存しているだけで、シークレットの値を読むことはありません。値の取得は**アプリ側**が、アプリの ID で Key Vault に対して行います。そのため、アプリの ID には App Configuration のデータ ロールと Key Vault のシークレットの読み取りロールの両方が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/use-key-vault-references-dotnet-core
+    - https://learn.microsoft.com/azure/azure-app-configuration/reference-python-provider
+
+- id: m-appcfg-null-label
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, labels, azure-cli]
+  question: |
+    App Configuration に同じキーが、ラベルなし・`dev`・`prod` の 3 つ存在します。CLI で**ラベルなし**のものだけを一覧したいです。正しい指定はどれですか。
+  options:
+    - "`az appconfig kv list --key 'RagApi:*' --label '\\0'`"
+    - "`az appconfig kv list --key 'RagApi:*' --label ''`"
+    - "`az appconfig kv list --key 'RagApi:*' --label null`"
+    - "`az appconfig kv list --key 'RagApi:*'`（ラベルを指定しなければラベルなしだけが返る）"
+  answer: A
+  explanation: |
+    ラベルなし（null ラベル）を明示的に指定するには `\0` を使います。`--label` を省略すると、すべてのラベルのキーと値が返ります。プロバイダーの `SettingSelector` でも、ラベル フィルターを省略すると既定でラベルなしが選ばれます（明示する場合は null ラベルを指定）。
+  refs:
+    - https://learn.microsoft.com/cli/azure/appconfig/kv
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-key-value#label-keys
+
+- id: m-appcfg-value-size
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, limits]
+  question: |
+    LLM のシステム プロンプト（約 40 KB の長文）を App Configuration の 1 つのキーと値に保存しようとしたところ失敗しました。最も適切な設計はどれですか。
+  options:
+    - "キーと値のサイズ上限（10 KB）を超えているので、プロンプト本文は Blob Storage などに保存し、App Configuration にはその参照（URL やバージョン）を保存する"
+    - "App Configuration を Premium 層にすれば保存できる"
+    - "プロンプトを Base64 にすれば保存できる"
+    - "ラベルを付ければ保存できる"
+  answer: A
+  explanation: |
+    App Configuration のキーと値は、キー・ラベル・値・コンテンツ タイプ・タグを合わせて 10 KB までです。大きなテキストは別のストレージに置き、App Configuration では「どのプロンプトのどのバージョンを使うか」を管理すると、切り替えも機能フラグやラベルで行えます。Base64 にすると、かえってサイズが増えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-key-value
+    - https://learn.microsoft.com/azure/azure-app-configuration/faq
+
+- id: m-appcfg-flag-storage
+  objective: "4.2"
+  type: yesno
+  difficulty: 3
+  tags: [app-configuration, feature-flags]
+  question: |
+    App Configuration の機能フラグについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "機能フラグは、`.appconfig.featureflag/` で始まるキーと、専用のコンテンツ タイプを持つキーと値として保存される。"
+      answer: true
+    - text: "機能フラグにもラベルを付けて、環境ごとに別の状態にできる。"
+      answer: true
+    - text: "機能フラグは、通常のキーと値とは別のストアに作成する必要がある。"
+      answer: false
+    - text: "機能フラグの変更も、動的リフレッシュでアプリに取り込める。"
+      answer: true
+  explanation: |
+    機能フラグは同じストアの中に、特別なプレフィックスとコンテンツ タイプを持つキーと値として保存されます。そのためラベルやスナップショット、リフレッシュなどの仕組みを通常の構成と同じように使えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-feature-management
+    - https://learn.microsoft.com/azure/azure-app-configuration/manage-feature-flags
+
+- id: m-appcfg-custom-filter
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, feature-filters, custom-filter]
+  question: |
+    新しい長文要約機能を、契約プランが `Enterprise` のテナントだけに公開したいです。ユーザーやグループではなく、テナントの契約プラン（アプリが知っている情報）で判定する必要があります。最も適切な方法はどれですか。
+  options:
+    - "アプリにカスタム機能フィルター（例: `TenantPlan`）を実装し、機能フラグにそのフィルターとパラメーター（`Plans: [\"Enterprise\"]`）を設定する"
+    - "割合フィルターで 30% にする"
+    - "時間枠フィルターを使う"
+    - "テナントごとに App Configuration ストアを作る"
+  answer: A
+  explanation: |
+    機能管理ライブラリでは、独自の判定ロジックを**カスタム機能フィルター**として実装できます。フィルターの名前とパラメーターは App Configuration の機能フラグに設定し、評価時にアプリのコンテキスト（テナントの情報など）を使って判定します。組み込みフィルター（割合・時間枠・ターゲット）では表現できない条件に使います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-feature-filters
+    - https://learn.microsoft.com/azure/azure-app-configuration/feature-management-python-reference
+
+- id: m-appcfg-flag-telemetry
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, feature-flags, telemetry, application-insights]
+  question: |
+    バリアント機能フラグでプロンプトの A/B テストをしています。「どのユーザーにどのバリアントが割り当てられたか」を Application Insights に記録し、回答への評価（高評価率）と結び付けて比較したいです。最も適切な方法はどれですか。
+  options:
+    - "機能フラグのテレメトリを有効にし、機能管理ライブラリの Application Insights 向けの発行機能で評価イベントを送る（評価結果とユーザー ID が記録される）"
+    - "バリアントごとに別の Application Insights リソースを作る"
+    - "評価結果を毎回ファイルに書き出して、手作業で集計する"
+    - "App Configuration の変更履歴を見る"
+  answer: A
+  explanation: |
+    機能フラグの**テレメトリ**を有効にすると、フラグが評価されるたびに、フラグ名・バリアント・ターゲット ID などの評価イベントが Application Insights に送られます。同じユーザー ID で記録したカスタム イベント（高評価など）と結合すれば、バリアントごとの効果を比較できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-telemetry
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-experimentation
+
+- id: m-appcfg-bicep-keyvalue
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, bicep, labels]
+  question: |
+    Bicep で、ラベル `prod` の付いたキー `RagApi:Search:TopK` を作成します。`Microsoft.AppConfiguration/configurationStores/keyValues` リソースの `name` に指定する値として正しいものはどれですか。
+  options:
+    - "`'RagApi:Search:TopK$prod'`（キーとラベルを `$` でつなぐ）"
+    - "`'RagApi:Search:TopK'` とし、ラベルは `tags` に指定する"
+    - "`'prod/RagApi:Search:TopK'`"
+    - "`'RagApi:Search:TopK@prod'`"
+  answer: A
+  explanation: |
+    ARM / Bicep の `keyValues` リソースでは、ラベル付きのキーと値の名前を「キー + `$` + ラベル」の形で指定します（ラベルなしならキーだけ）。タグはラベルとは別のメタデータです。なお、ARM でキーと値を扱うには、ストアの ARM 認証モード（ローカル／パススルー）に応じた権限が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/quickstart-bicep
+    - https://learn.microsoft.com/azure/templates/microsoft.appconfiguration/configurationstores/keyvalues
+
+- id: m-appcfg-filter-requirement
+  objective: "4.2"
+  type: yesno
+  difficulty: 3
+  tags: [app-configuration, feature-filters, requirement-type]
+  question: |
+    機能フラグ `Reranker` に、ターゲット フィルター（グループ `AI推進室`）と時間枠フィルター（12 月 1 日〜12 月 31 日）の 2 つを設定しました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "要件の種類（requirement type）が既定の `Any` なら、どちらかのフィルターを満たせば有効になる。"
+      answer: true
+    - text: "「AI 推進室のメンバーで、かつ 12 月の間だけ」有効にしたい場合は、要件の種類を `All` にする。"
+      answer: true
+    - text: "フラグ自体が無効（disabled）でも、フィルターの条件を満たせば有効と評価される。"
+      answer: false
+  explanation: |
+    複数のフィルターは、要件の種類が `Any`（既定）なら OR、`All` なら AND で評価されます。フラグ自体が無効なら、フィルターは評価されず常に無効です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-feature-filters
+    - https://learn.microsoft.com/azure/azure-app-configuration/feature-management-overview
