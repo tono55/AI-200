@@ -1,0 +1,363 @@
+# 分野 3 追加問題（2 周目）: Service Bus / Event Grid / Functions
+
+# ---------- 3.1 ----------
+- id: s-sb-duplicate-detection
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, duplicate-detection]
+  question: |
+    API は「埋め込み生成ジョブ」を Service Bus キューに送信します。送信がタイムアウトしたときに再送すると、実際には 1 回目が届いていて、同じジョブが 2 件キューに入ることがあります。送信側の再送による重複をキューの側で除きたい場合、最も適切な方法はどれですか。
+  options:
+    - "キューで重複検出を有効にし（作成時に設定）、送信側でジョブごとに決まった `message_id`（例: 文書 ID + バージョン）を付ける"
+    - "キューでセッションを有効にする"
+    - "受信モードを ReceiveAndDelete にする"
+    - "メッセージの TTL を短くする"
+  answer: A
+  explanation: |
+    **重複検出**は、指定した時間枠（重複検出の履歴期間）の間に同じ `MessageId` のメッセージが届いたら、後のものを受け付けたうえで破棄します。効果を得るには、再送しても同じ値になる `MessageId` を送信側で付ける必要があります（ランダムな GUID を毎回作ると意味がありません）。
+    重複検出はキュー・トピックの作成時に有効にする設定です。なお、受信側の再配信（ロック切れなど）による重複は防げないので、受信側のべき等性も別途必要です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/duplicate-detection
+
+- id: s-sb-batch-send
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, batch, python-sdk]
+  question: |
+    1 つの文書から作った 2,000 個のチャンクを、Service Bus キューに 1 チャンク 1 メッセージで送ります。1 件ずつ `send_messages` を呼ぶと遅いため、まとめて送りたいと考えています。メッセージ サイズの上限を超えないように送る方法として最も適切なものはどれですか（Python SDK）。
+  options:
+    - "`create_message_batch()` で作ったバッチに `add_message()` で追加し、`MessageSizeExceededError`（満杯）になったらそのバッチを送信して新しいバッチを作る"
+    - "2,000 個のチャンクを 1 つの JSON にまとめ、1 メッセージとして送る"
+    - "2,000 個のメッセージのリストを 1 回の `send_messages` に渡せば、SDK がサイズに関係なくすべて送る"
+    - "ReceiveAndDelete モードにすれば、送信が速くなる"
+  answer: A
+  explanation: |
+    `ServiceBusMessageBatch` は、追加のたびにバッチのサイズが上限を超えないかを確認し、超える場合は例外を出します。そこで送信して新しいバッチを作る、を繰り返すのが確実な方法です。
+    1 メッセージにまとめるとサイズ上限（Standard は 256 KB）に当たりやすく、チャンク単位の再試行や配信不能の扱いもできなくなります。リストを渡す方法も、合計がバッチの上限を超えるとエラーになります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-python-how-to-use-queues
+    - https://learn.microsoft.com/python/api/azure-servicebus/azure.servicebus.servicebusmessagebatch
+
+- id: s-sb-prefetch-lock
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, prefetch, lock]
+  question: |
+    スループットを上げるため、PeekLock で受信するワーカーで `prefetch_count=100` を設定しました。1 件の処理には約 20 秒かかり、キューのロック期間は 1 分です。その後、配信回数が増えて配信不能キューに移るメッセージが急増しました。最も可能性の高い原因はどれですか。
+  options:
+    - "プリフェッチしたメッセージは取得した時点でロックされ、処理を待つ間にロックが切れて再配信されている"
+    - "プリフェッチを有効にすると、重複検出が無効になる"
+    - "プリフェッチしたメッセージは ReceiveAndDelete で受信される"
+    - "プリフェッチ数がキューの最大サイズを超えている"
+  answer: A
+  explanation: |
+    PeekLock でプリフェッチすると、クライアントのバッファーに入った時点で各メッセージのロックが始まります。100 件 × 20 秒の処理では、後ろのメッセージは処理を始める前にロック期間（1 分）が切れ、他の受信者に再配信されて配信回数が増えます。
+    処理が遅いワーカーでは、プリフェッチ数を「ロック期間内に処理しきれる数」以下にするか、プリフェッチを使わないようにします。プリフェッチは 1 件の処理が速い場合に効果があります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-prefetch
+
+- id: s-sb-forward-dlq
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, auto-forward, dead-letter]
+  question: |
+    10 個のキューそれぞれに配信不能キュー（DLQ）があり、運用チームが 10 か所を監視するのが大変です。すべての配信不能メッセージを 1 つの調査用キュー `dlq-triage` に集めたい場合、最も適切な方法はどれですか。
+  options:
+    - "各キューで「配信不能メッセージの転送先」（`ForwardDeadLetteredMessagesTo`）に `dlq-triage` を設定する"
+    - "各キューの自動転送（`ForwardTo`）に `dlq-triage` を設定する"
+    - "各キューの最大配信回数を 1 にする"
+    - "`dlq-triage` を各キューのサブスクリプションにする"
+  answer: A
+  explanation: |
+    `ForwardDeadLetteredMessagesTo` を設定すると、そのキューで配信不能になったメッセージが自動で指定したキュー（またはトピック）に転送されます。`ForwardTo` は**通常のメッセージ**をすべて転送する設定なので、ワーカーがメッセージを受け取れなくなります。
+    転送先は同じ名前空間のエンティティである必要があります。調査では、元のキューを区別できるように、メッセージのプロパティ（配信不能の理由など）を確認します。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-auto-forwarding
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues
+
+# ---------- 3.2 ----------
+- id: s-eg-advanced-filter-api
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, advanced-filter, blob]
+  question: |
+    Blob の作成イベントで埋め込みを生成しています。ところが、アップロード時のイベントに加えて、ライフサイクル管理などによる操作でも `Microsoft.Storage.BlobCreated` が届き、不要な再生成が起きています。アップロード（`PutBlob` と `PutBlockList`）によるイベントだけをハンドラーに届けたい場合、イベント サブスクリプションにどのフィルターを追加しますか。
+  options:
+    - "高度なフィルター: キー `data.api`、演算子 `StringIn`、値 `PutBlob`、`PutBlockList`"
+    - "サブジェクト フィルター: 「次で終わる」に `.pdf`"
+    - "イベントの種類に `Microsoft.Storage.BlobDeleted` を追加する"
+    - "高度なフィルター: キー `subject`、演算子 `NumberGreaterThan`、値 `0`"
+  answer: A
+  explanation: |
+    高度なフィルターは、イベントの `data` の中のプロパティでも絞り込めます。Blob ストレージのイベントでは、どの API 操作でイベントが発生したかが `data.api` に入るので、`StringIn` でアップロードの操作だけを許可します。
+    サブジェクト フィルターはパスやファイル名（拡張子）の絞り込みには使えますが、操作の種類は区別できません。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+    - https://learn.microsoft.com/azure/event-grid/event-schema-blob-storage
+
+- id: s-eg-delivery-identity
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, managed-identity, service-bus]
+  question: |
+    Event Grid のシステム トピック（ストレージ アカウントのイベント）から、Service Bus キューにイベントを配信しています。Service Bus はセキュリティ ポリシーでローカル認証（SAS）を無効にし、「信頼された Microsoft サービス」からのアクセスだけを許可しています。配信を成功させるために必要な構成はどれですか。
+  options:
+    - "システム トピックでマネージド ID を有効にし、その ID に Service Bus の「Azure Service Bus Data Sender」ロールを付与し、イベント サブスクリプションでマネージド ID による配信を選ぶ"
+    - "Service Bus の SAS 接続文字列をイベント サブスクリプションに設定する"
+    - "Event Grid のサブスクリプションで再試行回数を 30 にする"
+    - "Service Bus キューでセッションを有効にする"
+  answer: A
+  explanation: |
+    Event Grid は、トピック（システム トピック・カスタム トピック・ドメイン）のマネージド ID で配信先を認証できます（マネージド ID による配信）。配信先の Service Bus では、その ID に送信ロールを付与します。ネットワーク制限がある配信先でも、マネージド ID による配信なら「信頼されたサービス」として許可されます。
+    再試行を増やしても、認証・認可のエラーは解決しません。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/managed-service-identity
+    - https://learn.microsoft.com/azure/event-grid/add-identity-roles
+
+- id: s-eg-cloudevents-fields
+  objective: "3.2"
+  type: match
+  difficulty: 2
+  tags: [event-grid, cloudevents]
+  question: |
+    文書管理アプリが「文書が承認された」というカスタム イベントを CloudEvents 1.0 で発行します。設定したい内容と、CloudEvents の属性を対応付けてください。
+  pairs:
+    - left: "イベントの種類（例: `Contoso.Documents.Approved`）"
+      right: "type"
+    - left: "イベントの発生元（例: `/apps/doc-manager`）"
+      right: "source"
+    - left: "対象の文書を示すパス（例: `/tenants/t1/docs/123`。サブジェクト フィルターで使う）"
+      right: "subject"
+    - left: "発生元の中で一意なイベントの識別子（受信側の重複排除に使う）"
+      right: "id"
+  distractors:
+    - "dataschema"
+  explanation: |
+    CloudEvents では `id`・`source`・`type`・`specversion` が必須で、`subject` は任意です。`source` + `id` の組み合わせでイベントが一意になるので、受信側の重複排除に使えます。
+    Event Grid のサブジェクト フィルター（「次で始まる」「次で終わる」）は `subject` に対して適用されるので、フィルターしたい情報を `subject` に入れる設計にします。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/cloud-event-schema
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+
+- id: s-eg-no-retry-codes
+  objective: "3.2"
+  type: yesno
+  difficulty: 3
+  tags: [event-grid, retry, dead-letter]
+  question: |
+    Webhook ハンドラーにイベントを配信するイベント サブスクリプション（配信不能は有効）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "ハンドラーが 400 Bad Request を返すと、Event Grid は再試行せずにそのイベントを配信不能にする。"
+      answer: true
+    - text: "ハンドラーが 503 Service Unavailable を返すと、Event Grid は時間をおいて再試行する。"
+      answer: true
+    - text: "ハンドラーが 30 秒以内に応答しないと、配信は失敗として扱われ、再試行の対象になる。"
+      answer: true
+    - text: "ハンドラーの一時的な障害のときは、400 を返すのが望ましい。"
+      answer: false
+  explanation: |
+    400・413 など「再試行しても成功しない」エラーは再試行されず、配信不能が有効なら配信不能に、無効なら破棄されます。それ以外（503 など）は再試行スケジュールに従って再試行され、30 秒以内に応答がない場合も失敗として再試行されます。
+    一時的な障害で 400 を返すと再試行されずに配信不能になるので、一時的な障害には 503 などを返します。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+# ---------- 3.3 ----------
+- id: s-func-binding-expression
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, bindings, binding-expressions]
+  question: |
+    Service Bus トリガーの関数は、`{"docId": "a1b2", "tenant": "t1"}` のような JSON メッセージを受け取ります。メッセージに含まれる値をもとに、Blob `docs/t1/a1b2.pdf` を入力バインドで読み込みたいと考えています。入力バインドの `path` に指定する値として正しいものはどれですか。
+  options:
+    - "`docs/{tenant}/{docId}.pdf`"
+    - "`docs/%tenant%/%docId%.pdf`"
+    - "`docs/{message.tenant}/{message.docId}.pdf` は使えないため、SDK で読むしかない"
+    - "`docs/$tenant/$docId.pdf`"
+  answer: A
+  explanation: |
+    トリガーのペイロードが JSON の場合、そのプロパティを**バインド式** `{プロパティ名}` で他のバインドのパスなどに使えます。ここでは `{tenant}` と `{docId}` がメッセージの値に置き換わります。
+    `%名前%` はアプリ設定の値を参照する別のバインド式です（例: コンテナー名を環境ごとに変える）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-expressions-patterns
+
+- id: s-func-cosmos-trigger-leases
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, cosmos-db, change-feed, leases]
+  question: |
+    同じ Cosmos DB コンテナー `docs` を監視する Cosmos DB トリガーの関数を 2 つ作りました（「埋め込みの再計算」と「検索キャッシュの無効化」）。どちらも既定のリース コンテナー `leases` を使っています。動かしてみると、それぞれの関数が**一部の変更しか受け取っていない**ようです。最も適切な対処はどれですか。
+  options:
+    - "関数ごとに異なる `lease_container_prefix`（`leaseContainerPrefix`）を設定するか、別のリース コンテナーを使う"
+    - "2 つの関数を別々の関数アプリに分ければ、同じリースのままでよい"
+    - "`start_from_beginning` を true にする"
+    - "`max_items_per_invocation` を 1 にする"
+  answer: A
+  explanation: |
+    Cosmos DB トリガーは変更フィード プロセッサで動き、リースで「どのパーティション範囲を誰が処理しているか」とチェックポイントを管理します。2 つの関数が同じリースを共有すると、**同じ処理の複数インスタンス**とみなされて変更を分け合ってしまいます。
+    独立して全部の変更を受け取りたいなら、関数ごとにリースのプレフィックスを分ける（同じリース コンテナーを共有できる）か、リース コンテナーを分けます。別のアプリに分けても、リースが同じなら同じ問題が起きます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/how-to-create-multiple-cosmos-db-triggers
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-trigger
+
+- id: s-func-timer-facts
+  objective: "3.3"
+  type: yesno
+  difficulty: 3
+  tags: [functions, timer-trigger]
+  question: |
+    毎時、外部 API から最新の文書を取り込む Timer トリガーの関数（`0 0 * * * *`）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "アプリが 5 インスタンスにスケール アウトしていても、Timer トリガーの関数は 1 回の時刻につき 1 つのインスタンスでだけ実行される。"
+      answer: true
+    - text: "`run_on_startup=True` にすると、デプロイや再起動、スケール アウトのたびにも実行されることがあるため、本番では通常使わない。"
+      answer: true
+    - text: "前回の実行がまだ終わっていなくても、次の時刻になれば別の実行が並行して始まる。"
+      answer: false
+  explanation: |
+    Timer トリガーはストレージのロック（シングルトン）を使い、スケール アウトしていても 1 つのインスタンスでだけ実行されます。前回の呼び出しがまだ実行中なら、次のトリガーは発生しません（並行実行しない）。また Timer トリガーは失敗しても再試行されず、次のスケジュールまで呼ばれません。
+    `run_on_startup` は起動のたびに実行されるので、想定外の実行（コストや二重取り込み）につながります。開発時の確認以外では使いません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-timer
+
+- id: s-func-blob-output
+  objective: "3.3"
+  type: dropdown
+  difficulty: 2
+  tags: [functions, python, blob-output, service-bus]
+  question: |
+    Service Bus キュー `summaries` のメッセージ（JSON: `{"docId": "...", "text": "..."}`）を受け取り、要約テキストを Blob `summaries/<docId>.txt` に保存する関数を完成させてください（Python v2 モデル、接続は ID ベース）。
+  language: python
+  template: |
+    @app.service_bus_queue_trigger(arg_name="msg", queue_name="summaries",
+                                   connection="ServiceBusConnection")
+    @app.{{1}}(arg_name="outblob", path="summaries/{{2}}.txt",
+                connection="StorageConnection")
+    def save_summary(msg: func.ServiceBusMessage, outblob: {{3}}):
+        body = json.loads(msg.get_body())
+        outblob.set(body["text"])
+  blanks:
+    "1":
+      options: ["blob_output", "blob_input", "blob_trigger", "queue_output"]
+      answer: "blob_output"
+    "2":
+      options: ["{docId}", "%docId%", "{id}", "{rand-guid}"]
+      answer: "{docId}"
+    "3":
+      options: ["func.Out[str]", "str", "func.InputStream", "bytes"]
+      answer: "func.Out[str]"
+  explanation: |
+    出力バインドは `@app.blob_output`、関数の引数の型は `func.Out[T]` で、`set()` で値を書き込みます。`path` の `{docId}` は、トリガーの JSON ペイロードのプロパティを使うバインド式です。
+    `connection` にはアプリ設定のプレフィックス名を指定し、ID ベースの接続なら `StorageConnection__blobServiceUri` などの設定とロールの付与（Storage Blob Data Contributor）を行います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-storage-blob-output
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-expressions-patterns
+
+# ---------- 3.4 ----------
+- id: s-func-flex-no-slots
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, flex-consumption, deployment]
+  question: |
+    Flex Consumption プランの関数アプリで、新しいバージョンをダウンタイムなしで本番に出したいと考えています。チームは App Service と同じように staging スロットを作ってスワップする手順を考えていましたが、スロットを作成できません。最も適切な対応はどれですか。
+  options:
+    - "Flex Consumption はデプロイ スロットをサポートしないため、サイト更新戦略をローリング更新にしてデプロイする（検証は別の関数アプリで行う）"
+    - "Flex Consumption で staging スロットを作るには、Always Ready インスタンスを 1 以上にする"
+    - "関数アプリを Consumption プランにその場で移行してからスロットを作る"
+    - "ARM テンプレートならスロットを作成できる"
+  answer: A
+  explanation: |
+    Flex Consumption プランはデプロイ スロットをサポートしていません。ダウンタイムなしのデプロイには、サイト更新戦略の**ローリング更新**を使います。検証用の環境が必要なら、別の関数アプリ（dev / staging）を用意します。
+    また、他のプランから Flex Consumption への（またはその逆の）その場での移行はできず、新しいアプリを作って再デプロイする必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-deployment-slots
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-site-updates
+
+- id: s-func-local-settings
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, configuration, local-settings]
+  question: |
+    ローカルでは正常に動く Service Bus トリガーの関数を Azure にデプロイしたところ、関数が起動せず「`ServiceBusConnection__fullyQualifiedNamespace` が見つからない」というエラーになりました。ローカルでは `local.settings.json` の `Values` に設定しています。原因として最も適切なものはどれですか。
+  options:
+    - "`local.settings.json` はローカル実行専用でデプロイされないため、Azure の関数アプリのアプリ設定（環境変数）に同じ設定を追加する必要がある"
+    - "`local.settings.json` の `Values` ではなく `Host` に書く必要がある"
+    - "`host.json` に Service Bus の接続文字列を書く必要がある"
+    - "ID ベースの接続は Azure ではサポートされていない"
+  answer: A
+  explanation: |
+    `local.settings.json` は Core Tools でローカル実行するときだけ使われ、既定ではデプロイされません（シークレットを含むので、ソース管理からも除外します）。Azure ではアプリ設定に同じ名前で設定し、マネージド ID に Service Bus のデータ ロール（受信なら Azure Service Bus Data Receiver）を付与します。
+    `host.json` はランタイムの動作（並列数、再試行など）の設定で、接続情報は置きません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-develop-local
+    - https://learn.microsoft.com/azure/azure-functions/functions-app-settings
+
+- id: s-func-flex-per-function-scaling
+  objective: "3.4"
+  type: yesno
+  difficulty: 3
+  tags: [functions, flex-consumption, scaling]
+  question: |
+    Flex Consumption の 1 つの関数アプリに、HTTP トリガーの関数 2 つ（`ask`、`feedback`）と Service Bus トリガーの関数 1 つ（`embed`）があります。次の記述が正しいかを答えてください。
+  statements:
+    - text: "`embed` は HTTP の関数とは別に、キューの状況に応じて独立してスケールする。"
+      answer: true
+    - text: "`ask` と `feedback` は HTTP トリガーのグループとして、同じインスタンス群で一緒にスケールする。"
+      answer: true
+    - text: "最大インスタンス数（`--maximum-instance-count`）は、アプリ全体のインスタンスの合計に対する上限である。"
+      answer: false
+  explanation: |
+    Flex Consumption は**関数ごとのスケーリング**を行います。HTTP トリガー、Blob（Event Grid ベース）トリガー、Durable Functions はそれぞれグループとしてまとめてスケールし、それ以外のトリガー（Service Bus など）は関数ごとに独立してスケールします。
+    最大インスタンス数は、各グループ（関数グループ）のオンデマンド インスタンスに対して適用されます（Always Ready インスタンスは含みません）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan
+    - https://learn.microsoft.com/azure/azure-functions/event-driven-scaling
+
+- id: s-func-max-instance-downstream
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, flex-consumption, scaling, postgresql]
+  question: |
+    Flex Consumption の Service Bus トリガーの関数が PostgreSQL に書き込んでいます。キューに大量のメッセージが入ると関数が数百インスタンスまでスケール アウトし、データベースの接続数が上限に達してエラーになります。関数アプリ側でできる最も直接的な対策はどれですか。
+  options:
+    - "`az functionapp scale config set --maximum-instance-count` で最大インスタンス数を下げ、必要なら 1 インスタンスあたりの同時実行数も調整する"
+    - "Always Ready インスタンスを 0 にする"
+    - "インスタンスのメモリ サイズを最大にする"
+    - "Timer トリガーに変える"
+  answer: A
+  explanation: |
+    Flex Consumption の最大インスタンス数（既定 100、1〜1,000）は、下流のデータベースなどの処理能力が限られている場合にスケール アウトを抑える目的で使います。メッセージはキューにたまるだけで失われないので、上限を下げても処理が遅れるだけで済みます。
+    あわせて、データベース側で PgBouncer などの接続プールを使うと、より多くのクライアントを少ない接続で処理できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/event-driven-scaling
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-how-to
+
+- id: s-func-flex-vnet
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, flex-consumption, vnet]
+  question: |
+    Flex Consumption の関数アプリから、プライベート エンドポイントだけを公開している Azure Managed Redis に接続します。VNet 統合を構成するとき、統合用サブネットについて正しい説明はどれですか。
+  options:
+    - "サブネットを `Microsoft.App/environments` に委任し、/27 以上のサイズにする（プライベート エンドポイントなど他の用途には使わない）"
+    - "サブネットに委任は不要で、プライベート エンドポイントと同じサブネットを使う必要がある"
+    - "Flex Consumption は VNet 統合をサポートしないため、Premium プランに移行する"
+    - "サブネットを `Microsoft.Web/serverFarms` に委任し、サイズは /29 で十分である"
+  answer: A
+  explanation: |
+    Flex Consumption の VNet 統合では、統合用サブネットを `Microsoft.App/environments` に委任します（App Service や Premium プランの VNet 統合は `Microsoft.Web/serverFarms`）。サイズは /27 以上で、複数のアプリや大規模なスケールでは /26 が推奨です（Premium と違い、インスタンスごとに IP を使うのではなく、プラットフォームのゲートウェイがサブネットの IP を共有します）。統合用サブネットは、プライベート エンドポイントや他のサービスの委任には使えません。
+    VNet 統合は送信方向の機能なので、Redis の名前をプライベート IP に解決するプライベート DNS ゾーンを VNet にリンクすることも必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-how-to
+    - https://learn.microsoft.com/azure/azure-functions/functions-networking-options
