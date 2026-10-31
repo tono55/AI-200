@@ -1,0 +1,506 @@
+# 配点比率の調整用の追加問題: 分野 3 の補強と、分野 1（1.1〜1.3）の 3 周目
+
+# ---------- 3.1 ----------
+- id: s-sb-lock-lost-causes
+  objective: "3.1"
+  type: multiple
+  difficulty: 3
+  tags: [service-bus, lock, troubleshooting]
+  question: |
+    ワーカーのログに `MessageLockLostError`（ロックが失われた）が頻発し、同じメッセージが重複して処理されています。原因として考えられるものを **2 つ**選んでください。
+  options:
+    - "1 件の処理時間がロック期間より長く、ロックの更新もしていない"
+    - "プリフェッチ数が大きく、バッファー内で処理を待つ間にロックが切れている"
+    - "キューで重複検出を有効にしている"
+    - "メッセージの TTL がロック期間より長い"
+  answer: [A, B]
+  explanation: |
+    ロックは受信時（プリフェッチではバッファーに入った時）から期限が始まります。処理が長いのに更新しない、またはプリフェッチで受け取ったメッセージが処理を待つ間に期限切れになると、完了しようとしたときにロックを失い、メッセージは再配信されます。
+    重複検出は送信側の重複を除く機能で、TTL はメッセージの有効期限です。どちらもロックの喪失の原因にはなりません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-prefetch
+
+# ---------- 3.2 ----------
+- id: s-eg-mi-delivery-order
+  objective: "3.2"
+  type: order
+  difficulty: 3
+  tags: [event-grid, managed-identity, service-bus]
+  question: |
+    ローカル認証を無効にした Service Bus キューへ、Event Grid のカスタム トピックからマネージド ID で配信します。設定の手順を正しい順に並べてください。
+  items:
+    - "カスタム トピックでシステム割り当てマネージド ID を有効にする"
+    - "そのマネージド ID に、Service Bus キュー（または名前空間）の Azure Service Bus Data Sender ロールを付与する"
+    - "イベント サブスクリプションを作成し、配信先に Service Bus キューを指定して、配信の認証に「システム割り当て ID」を選ぶ"
+    - "テスト イベントを発行し、キューにメッセージが届くことと、配信失敗のメトリックが増えていないことを確認する"
+  distractors:
+    - "Service Bus の SAS 接続文字列をイベント サブスクリプションに貼り付ける"
+  explanation: |
+    マネージド ID による配信では、まずトピック側に ID を用意し、配信先でその ID に送信の権限を与えてから、サブスクリプションで「ID を使って配信する」ことを指定します。ロールの割り当ての反映には数分かかることがあるので、確認はその後に行います。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/managed-service-identity
+    - https://learn.microsoft.com/azure/event-grid/add-identity-roles
+
+- id: s-eg-reliable-webhook
+  objective: "3.2"
+  type: multiple
+  difficulty: 3
+  tags: [event-grid, webhook, reliability]
+  question: |
+    Event Grid の Webhook ハンドラーで、受け取ったイベントごとに数分かかる処理を行います。ハンドラーの障害時にもイベントを失わず、不要な再配信も起こさないための設計として、適切なものを **2 つ**選んでください。
+  options:
+    - "ハンドラーはイベントをキューなどに保存したらすぐに 200（または 202）を返し、重い処理は非同期で行う"
+    - "イベント サブスクリプションで配信不能先（Blob コンテナー）を設定する"
+    - "処理が終わるまで応答を返さず、数分後に 200 を返す"
+    - "処理に失敗したときは 400 を返して再試行させる"
+  answer: [A, B]
+  explanation: |
+    Event Grid は応答を 30 秒待ち、それを過ぎると失敗として再試行します。ハンドラーはすぐに応答し、処理は非同期で行います。再試行を使い切ったイベントを失わないよう、配信不能先も設定します。
+    400 は「再試行しても成功しない」と見なされ、再試行されずに配信不能（または破棄）になります。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+    - https://learn.microsoft.com/azure/event-grid/manage-event-delivery
+
+# ---------- 3.3 ----------
+- id: s-func-secure-internal-http
+  objective: "3.3"
+  type: multiple
+  difficulty: 3
+  tags: [functions, http-trigger, security, entra-id]
+  question: |
+    社員だけが使う SPA から、関数アプリの HTTP API を呼びます。社員の Entra ID でサインインしたユーザーだけが呼べるようにしたいです。適切な対策を **2 つ**選んでください。
+  options:
+    - "関数アプリの組み込み認証（App Service 認証）で Microsoft Entra ID を構成し、認証されていない要求を拒否する"
+    - "SPA は MSAL でアクセス トークンを取得し、`Authorization: Bearer` ヘッダーで API を呼ぶ"
+    - "関数キーを SPA の JavaScript に埋め込み、`x-functions-key` ヘッダーで送る"
+    - "関数の承認レベルを Anonymous にし、CORS で SPA のオリジンだけを許可すれば十分である"
+  answer: [A, B]
+  explanation: |
+    ユーザーの認証には Entra ID のトークンを使います。組み込み認証を構成すると、プラットフォームがトークンを検証し、関数には検証済みのユーザー情報（ヘッダー）が渡されます。
+    関数キーはブラウザーに配るとだれでも取り出せるので、ユーザーの認証には使えません。CORS はブラウザーの制御で、curl などからの呼び出しは防げません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/overview-authentication-authorization
+    - https://learn.microsoft.com/azure/azure-functions/security-concepts
+
+- id: s-func-orchestrator-constraints
+  objective: "3.3"
+  type: multiple
+  difficulty: 3
+  tags: [functions, durable-functions, determinism]
+  question: |
+    Durable Functions のオーケストレーター関数の中に書くと**問題になる**コードを **2 つ**選んでください。
+  options:
+    - "`datetime.utcnow()` で現在時刻を取得し、期限の計算に使う"
+    - "`requests.get()` で外部の API を直接呼ぶ"
+    - "`yield context.call_activity(\"Summarize\", doc)` でアクティビティを呼ぶ"
+    - "`context.current_utc_datetime` で現在時刻を取得する"
+  answer: [A, B]
+  explanation: |
+    オーケストレーターは履歴から何度も再生されるため、**決定的**でなければなりません。現在時刻や乱数は再生のたびに値が変わるので、`context.current_utc_datetime` や `context.new_uuid()` を使います。外部 API の呼び出しなどの I/O はアクティビティに移します（再生時には履歴の結果が使われます）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-code-constraints
+
+# ---------- 3.4 ----------
+- id: s-func-cold-start-reduce
+  objective: "3.4"
+  type: multiple
+  difficulty: 3
+  tags: [functions, flex-consumption, cold-start]
+  question: |
+    Flex Consumption の Python の HTTP 関数で、しばらく要求がなかった後の最初の応答が遅い（コールド スタート）ことが問題です。効果のある対策を **2 つ**選んでください。
+  options:
+    - "HTTP グループに Always Ready インスタンスを設定する"
+    - "起動時に読み込む依存パッケージを減らし、重いライブラリは必要になったときに読み込む"
+    - "最大インスタンス数を 1,000 にする"
+    - "HTTP のインスタンスあたりの同時実行数を 1 にする"
+  answer: [A, B]
+  explanation: |
+    Always Ready インスタンスは常に起動済みのインスタンスを用意するので、コールド スタートを避けられます（その分のベースライン料金がかかります）。起動時の処理（インポートや初期化）を軽くすることも、新しいインスタンスの起動を速くします。
+    最大インスタンス数や同時実行数は、スケール アウトの上限や速さに関する設定で、最初の 1 インスタンスの起動時間は短くなりません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan#always-ready-instances
+    - https://learn.microsoft.com/azure/azure-functions/python-scale-performance-reference
+
+- id: s-func-flex-rollback
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, flex-consumption, deployment, rollback]
+  question: |
+    Flex Consumption の関数アプリに新しいバージョンをデプロイした直後から、エラーが急増しました。デプロイ スロットはありません。最も速く前の状態に戻す方法はどれですか。
+  options:
+    - "CI/CD で保存しておいた、直前の正常なバージョンのデプロイ パッケージ（ビルド成果物）を再デプロイする"
+    - "関数アプリを削除して作り直す"
+    - "Always Ready インスタンスを増やす"
+    - "最大インスタンス数を 0 にする"
+  answer: A
+  explanation: |
+    スロットのない Flex Consumption では、前のバージョンのパッケージを再デプロイすることでロールバックします。そのため、CI/CD でビルド成果物をバージョンごとに保存しておき、すぐに再デプロイできるようにしておくことが重要です。関数アプリを作り直すと、設定や ID の構成もやり直しになります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-rollback-deployments
+
+# ---------- 1.1 ----------
+- id: c-acr-artifact-cache
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, artifact-cache, docker-hub]
+  question: |
+    AKS のノードが Docker Hub から直接 `python:3.12-slim` などの公開イメージを取得しており、スケール アウト時に Docker Hub のレート制限でプルが失敗することがあります。イメージの参照先を自社の ACR に変えるだけで、上流の更新も取り込めるようにしたい場合、最も適切な機能はどれですか。
+  options:
+    - "ACR のアーティファクト キャッシュ（キャッシュ ルールで Docker Hub のリポジトリを ACR のリポジトリに対応付ける）"
+    - "ACR の geo レプリケーション"
+    - "ACR の匿名プル"
+    - "ACR の保持ポリシー"
+  answer: A
+  explanation: |
+    **アーティファクト キャッシュ**は、上流のレジストリ（Docker Hub など）のイメージを ACR 経由で取得してキャッシュする機能です。キャッシュ ルールを作り、AKS は ACR のリポジトリを参照するだけで、初回は上流から取得してキャッシュし、以降は ACR から配信されます。Docker Hub の認証情報は Key Vault に保存して使えます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/artifact-cache-overview
+
+- id: c-acr-multiarch-manifest
+  objective: "1.1"
+  type: yesno
+  difficulty: 3
+  tags: [acr, multi-arch, manifest-list]
+  question: |
+    同じタグ `api:2.1` で、amd64 と arm64 の両方のノードで動くイメージを ACR に置きたいと考え、`docker buildx build --platform linux/amd64,linux/arm64 -t contoso.azurecr.io/api:2.1 --push .` を実行しました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "タグ `api:2.1` は、各アーキテクチャのイメージを指すマニフェスト リスト（イメージ インデックス）を参照する。"
+      answer: true
+    - text: "ノードは、自分のアーキテクチャに合うイメージを自動で選んでプルする。"
+      answer: true
+    - text: "arm64 のノードで使うには、タグを `api:2.1-arm64` のように分けて Deployment を 2 つ作る必要がある。"
+      answer: false
+  explanation: |
+    マルチアーキテクチャのイメージは、アーキテクチャごとのマニフェストをまとめた**マニフェスト リスト**として 1 つのタグで公開されます。コンテナー ランタイムは自分のプラットフォームに合うものを選ぶので、混在するノード プールでも同じマニフェストのまま動かせます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/push-multi-architecture-images
+    - https://learn.microsoft.com/azure/container-registry/container-registry-image-formats
+
+- id: c-acr-notation-sign
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, image-signing, notation, supply-chain]
+  question: |
+    セキュリティ要件で、CI がビルドしたイメージだけが AKS で実行されるようにしたいです（改ざんされたイメージや、手元でビルドしたイメージを動かさない）。最も適切な組み合わせはどれですか。
+  options:
+    - "CI で Notation と Key Vault の署名鍵を使ってイメージに署名して ACR に保存し、AKS 側で Ratify と Azure Policy により署名を検証してから実行を許可する"
+    - "イメージのタグに `signed` を付ける"
+    - "ACR の管理者ユーザーを無効にするだけでよい"
+    - "イメージを小さくして攻撃面を減らす"
+  answer: A
+  explanation: |
+    イメージの署名（Notary Project の Notation）は、イメージのダイジェストに対する署名を OCI 成果物として ACR に保存します。署名鍵は Key Vault で管理します。実行時に AKS で署名を検証（Ratify + Azure Policy）すれば、信頼できる署名のないイメージの実行を拒否できます。タグは誰でも付け替えられるので、信頼の根拠になりません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tutorial-sign-build-push
+    - https://learn.microsoft.com/azure/aks/image-integrity
+
+- id: c-acr-vuln-scan
+  objective: "1.1"
+  type: single
+  difficulty: 2
+  tags: [acr, vulnerability-assessment, defender]
+  question: |
+    ACR に保存しているイメージに、既知の脆弱性（CVE）を含むパッケージがないかを継続的に確認し、実行中の AKS のどのイメージが影響を受けるかも把握したいです。最も適切な方法はどれですか。
+  options:
+    - "Microsoft Defender for Containers を有効にし、レジストリのイメージの脆弱性評価の結果を確認する"
+    - "ACR の geo レプリケーションを有効にする"
+    - "ACR Tasks の `--no-push` を使う"
+    - "イメージのタグに日付を付ける"
+  answer: A
+  explanation: |
+    Defender for Containers は、ACR にプッシュされたイメージや、実行中のコンテナーのイメージの脆弱性を評価し、推奨事項として表示します。修正されたベース イメージが出たら、ACR Tasks のベース イメージ更新トリガーで再ビルドする、といった運用と組み合わせます。
+  refs:
+    - https://learn.microsoft.com/azure/defender-for-cloud/agentless-vulnerability-assessment-azure
+
+- id: c-acr-delete-digest
+  objective: "1.1"
+  type: yesno
+  difficulty: 3
+  tags: [acr, manifests, delete]
+  question: |
+    リポジトリ `api` のイメージ（ダイジェスト `sha256:abc...`）に、タグ `2.0` と `stable` が付いています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "`az acr repository untag --image api:2.0` を実行すると、タグ `2.0` だけが外れ、`stable` で引き続きプルできる。"
+      answer: true
+    - text: "`az acr repository delete --image api@sha256:abc...` を実行すると、マニフェストとそれを参照するタグ（`2.0` と `stable`）がすべて削除される。"
+      answer: true
+    - text: "`az acr repository delete --image api:2.0` を実行しても、`stable` のタグは残ってプルできる。"
+      answer: false
+  explanation: |
+    `untag` はタグだけを外し、マニフェストは残ります。`delete` でイメージを指定すると、タグで指定してもダイジェストで指定しても**マニフェスト自体**が削除され、それを参照するすべてのタグも消えます。ほかの環境で同じイメージを使っていないか確認してから削除します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-delete
+
+- id: c-acr-show-tags
+  objective: "1.1"
+  type: dropdown
+  difficulty: 2
+  tags: [acr, azure-cli]
+  question: |
+    リポジトリ `api` で、最近プッシュされた順に 5 つのタグを表示するコマンドを完成させてください。
+  language: bash
+  template: |
+    az acr repository {{1}} --name contoso --repository api \
+      --orderby {{2}} --top {{3}} -o table
+  blanks:
+    "1":
+      options: ["show-tags", "list", "show-manifests", "show"]
+      answer: "show-tags"
+    "2":
+      options: ["time_desc", "time_asc", "name", "size"]
+      answer: "time_desc"
+    "3":
+      options: ["5", "-5", "first5", "limit=5"]
+      answer: "5"
+  explanation: |
+    タグの一覧は `az acr repository show-tags` で、`--orderby time_desc` で新しい順、`--top` で件数を指定します。マニフェスト（ダイジェスト）ごとの情報やタグのないマニフェストを確認するには `az acr manifest list-metadata` を使います。
+  refs:
+    - https://learn.microsoft.com/cli/azure/acr/repository
+
+# ---------- 1.2 ----------
+- id: c-acrtask-branch-context
+  objective: "1.2"
+  type: dropdown
+  difficulty: 3
+  tags: [acr-tasks, git, context]
+  question: |
+    GitHub のリポジトリ `contoso/rag` の `release` ブランチにコミットされたら、`src/api` フォルダーをコンテキストにしてイメージをビルドするタスクを作ります。コマンドを完成させてください。
+  language: bash
+  template: |
+    az acr task create --registry contoso --name build-api \
+      --image "api:{{1}}" \
+      --context https://github.com/contoso/rag.git{{2}} \
+      --file Dockerfile \
+      --git-access-token $GIT_PAT \
+      --commit-trigger-enabled {{3}}
+  blanks:
+    "1":
+      options: ["{{.Run.ID}}", "latest", "$(date)", "{{.Run.Image}}"]
+      answer: "{{.Run.ID}}"
+    "2":
+      options: ["#release:src/api", "/release/src/api", "?branch=release&path=src/api", "@release:src/api"]
+      answer: "#release:src/api"
+    "3":
+      options: ["true", "false", "release", "auto"]
+      answer: "true"
+  explanation: |
+    Git のコンテキストは `<リポジトリ URL>#<ブランチ>:<フォルダー>` の形式で、ブランチとサブフォルダーを指定できます。`--commit-trigger-enabled true` で、そのブランチへのコミットでタスクが実行されます（PAT にはリポジトリの webhook を設定する権限が必要）。タグには実行ごとに一意な `{{.Run.ID}}` を使います。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tutorial-build-task
+    - https://learn.microsoft.com/cli/azure/acr/task
+
+- id: c-acrtask-manual-set
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, run, values]
+  question: |
+    マルチステップ タスク `build-model-server` の YAML では、ビルド引数に `{{.Values.MODEL_VERSION}}` を使っています。通常は値ファイルの既定値を使いますが、今回だけ `MODEL_VERSION=7` で手動実行したいです。正しいコマンドはどれですか。
+  options:
+    - "`az acr task run --registry contoso --name build-model-server --set MODEL_VERSION=7`"
+    - "`az acr build --registry contoso --build-arg MODEL_VERSION=7 build-model-server`"
+    - "`az acr task update --name build-model-server --set MODEL_VERSION=7` の後、コミットを待つ"
+    - "`az acr run --name build-model-server MODEL_VERSION=7`"
+  answer: A
+  explanation: |
+    `az acr task run` で既存のタスクを手動で実行でき、`--set` でその実行だけのカスタム値を指定できます（YAML からは `{{.Values.<名前>}}` で参照）。値ファイルを使う場合は `--values` を指定します。`az acr task update` はタスクの定義を変更するもので、今回だけの実行には向きません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-reference-yaml
+    - https://learn.microsoft.com/cli/azure/acr/task#az-acr-task-run
+
+- id: c-acrtask-command-match
+  objective: "1.2"
+  type: match
+  difficulty: 2
+  tags: [acr-tasks, azure-cli]
+  question: |
+    やりたいことと、使う Azure CLI のコマンドを対応付けてください。
+  pairs:
+    - left: "手元のソースから 1 回だけイメージをビルドしてプッシュする"
+      right: "az acr build"
+    - left: "YAML のマルチステップの処理を 1 回だけ実行する"
+      right: "az acr run"
+    - left: "コミットやベース イメージの更新、タイマーで自動実行されるビルドを登録する"
+      right: "az acr task create"
+    - left: "別のレジストリのイメージを、ビルドせずに取り込む"
+      right: "az acr import"
+  distractors:
+    - "az acr login"
+  explanation: |
+    `az acr build` と `az acr run` は一度だけ実行するクイック タスク、`az acr task create` はトリガー付きで繰り返し実行するタスクの登録です。ビルドが不要な取り込みには `az acr import` を使います。`az acr login` はローカルの Docker に認証情報を設定するだけです。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+    - https://learn.microsoft.com/azure/container-registry/container-registry-import-images
+
+- id: c-acrtask-triggers-multiple
+  objective: "1.2"
+  type: multiple
+  difficulty: 2
+  tags: [acr-tasks, triggers]
+  question: |
+    `az acr task create` で作成したタスクを自動で実行させることができるトリガーを **3 つ**選んでください。
+  options:
+    - "ソース リポジトリへのコミット（またはプル リクエスト）"
+    - "ベース イメージの更新"
+    - "タイマー（cron 式のスケジュール）"
+    - "レジストリからのイメージのプル"
+    - "`az acr login` の実行"
+  answer: [A, B, C]
+  explanation: |
+    ACR Tasks の自動トリガーは、ソースの更新（コミット・プル リクエスト）、ベース イメージの更新、タイマーの 3 種類です。イメージのプルやログインではタスクは実行されません。どのトリガーも、必要に応じて有効・無効を切り替えられます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+
+- id: c-acrtask-timer-add
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, timer]
+  question: |
+    既存のタスク `nightly-scan` は毎日 UTC 1 時に実行されています。これに加えて、毎週日曜の UTC 12 時にも実行させたいです。最も適切な方法はどれですか。
+  options:
+    - "`az acr task timer add --name nightly-scan --registry contoso --timer-name weekly --schedule \"0 12 * * 0\"` でタイマーを追加する"
+    - "同じ内容のタスクをもう 1 つ作る必要がある"
+    - "既存のタイマーの cron 式を `0 1,12 * * *` に変更する"
+    - "ACR Tasks には 1 つのタイマーしか設定できないので、外部のスケジューラーを使う"
+  answer: A
+  explanation: |
+    1 つのタスクに複数のタイマー トリガーを設定でき、`az acr task timer add` / `update` / `remove` で管理します。cron 式は UTC で、「分 時 日 月 曜日」の順です（日曜は 0）。`0 1,12 * * *` にすると毎日 2 回実行されてしまいます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-scheduled
+
+- id: c-acr-imagepushed-event
+  objective: "1.2"
+  type: single
+  difficulty: 3
+  tags: [acr, event-grid, cd]
+  question: |
+    ACR Tasks が新しいイメージをプッシュしたら、自動で検証環境へのデプロイ パイプラインを開始したいです。ポーリングせずに実現する方法として最も適切なものはどれですか。
+  options:
+    - "ACR の Event Grid イベント `Microsoft.ContainerRegistry.ImagePushed` をサブスクライブし（リポジトリやタグでフィルター）、パイプラインを開始する関数や webhook に配信する"
+    - "パイプラインで 1 分ごとに `az acr repository show-tags` を実行して新しいタグを探す"
+    - "ACR Tasks の `--no-push` を使う"
+    - "AKS で `imagePullPolicy: Always` にする"
+  answer: A
+  explanation: |
+    ACR はイメージのプッシュや削除を Event Grid のイベント（`ImagePushed`、`ImageDeleted` など）として発行します。イベントの `data.target` にリポジトリ・タグ・ダイジェストが入るので、フィルターで対象を絞り、デプロイの処理につなげられます（ACR の webhook でも同様のことができます）。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-schema-container-registry
+    - https://learn.microsoft.com/azure/container-registry/container-registry-event-grid-quickstart
+
+# ---------- 1.3 ----------
+- id: c-appsvc-scale-plan
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, scaling, app-service-plan]
+  question: |
+    1 つの App Service プラン（Premium v3、2 インスタンス）で、負荷の高い推論 API と、ほとんどアクセスのない管理画面の 2 つのアプリを動かしています。推論 API のために、プランの自動スケールで最大 10 インスタンスにしました。この構成について正しい説明はどれですか。
+  options:
+    - "スケールはプラン単位なので、管理画面のアプリも 10 インスタンスで動き、そのリソースを消費する。負荷特性が違うアプリはプランを分けることを検討する"
+    - "自動スケールは、負荷の高いアプリだけのインスタンスを増やす"
+    - "App Service プランでは自動スケールを使えない"
+    - "インスタンスを増やすと、アプリのメモリ上限も 10 倍になる"
+  answer: A
+  explanation: |
+    App Service では、スケール アウトの単位は**プラン**で、プラン内のすべてのアプリが全インスタンスで実行されます（アプリごとのスケーリングを構成しない限り）。性能要件の違うアプリを同じプランに置くと、互いに影響し合います。重要なアプリはプランを分けるのが基本です。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/overview-hosting-plans
+    - https://learn.microsoft.com/azure/app-service/manage-scale-up
+
+- id: c-appsvc-easy-auth
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, authentication, entra-id]
+  question: |
+    App Service のコンテナーで動く社内向けチャット アプリに、Entra ID のサインインを追加したいです。アプリのコードはできるだけ変えたくありません。組み込みの認証（Easy Auth）を有効にした場合の動作として正しいものはどれですか。
+  options:
+    - "プラットフォームがサインインとトークンの検証を行い、認証済みのユーザー情報を `X-MS-CLIENT-PRINCIPAL-NAME` などのヘッダーでアプリに渡す"
+    - "アプリのコンテナーの中に、自動で認証ライブラリがインストールされる"
+    - "Easy Auth を使うには、アプリのコードで OAuth のフローを実装する必要がある"
+    - "Easy Auth はコンテナーでは使えない"
+  answer: A
+  explanation: |
+    組み込み認証は、アプリの前段（プラットフォームのモジュール）で認証を処理し、認証されていない要求をサインインにリダイレクトまたは拒否します。アプリにはユーザー情報がヘッダーで渡されるので、コードの変更は最小限で済みます。コンテナーのアプリでも使えます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/overview-authentication-authorization
+    - https://learn.microsoft.com/azure/app-service/configure-authentication-user-identities
+
+- id: c-appsvc-frontdoor-only
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, access-restrictions, front-door]
+  question: |
+    App Service の前段に Azure Front Door（WAF 付き）を置きました。App Service の既定のホスト名に直接アクセスされると WAF を迂回されてしまいます。自社の Front Door のプロファイル経由の要求だけを受け付けるには、どうしますか。
+  options:
+    - "アクセス制限でサービス タグ `AzureFrontDoor.Backend` を許可し、さらに `X-Azure-FDID` ヘッダーが自社の Front Door の ID と一致する要求だけを許可する"
+    - "サービス タグ `AzureFrontDoor.Backend` を許可するだけで十分である"
+    - "App Service のカスタム ドメインを削除する"
+    - "CORS で Front Door のドメインを許可する"
+  answer: A
+  explanation: |
+    `AzureFrontDoor.Backend` のサービス タグは、**すべての顧客**の Front Door からの送信元 IP を含みます。他人の Front Door からのアクセスを防ぐため、Front Door が付けるヘッダー `X-Azure-FDID`（プロファイル固有の ID）の値でも絞り込みます。CORS はブラウザーの制御で、サーバーへの到達を防ぐものではありません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/app-service-ip-restrictions#restrict-access-to-a-specific-azure-front-door-instance
+
+- id: c-appsvc-ssh-container
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, ssh, custom-container]
+  question: |
+    App Service（Linux、カスタム コンテナー）で動くアプリの中を調べるため、ポータルの「SSH」で接続しようとしましたが接続できません。コード ベースの組み込みイメージでは使えていました。カスタム コンテナーで SSH を使えるようにするには、イメージに何が必要ですか。
+  options:
+    - "SSH サーバー（sshd）をイメージに入れ、App Service が指定する設定（ポート 2222 で待ち受けるなど）で起動する"
+    - "コンテナーのポート 22 をインターネットに公開する"
+    - "App Service の Always On を有効にする"
+    - "カスタム コンテナーでは SSH を使う方法はない"
+  answer: A
+  explanation: |
+    組み込みイメージには SSH の設定が含まれていますが、カスタム コンテナーでは、イメージに sshd を入れ、App Service の要件（コンテナー内のポート 2222 で待ち受ける、決められた設定ファイルを使う）に従って起動する必要があります。この SSH はポータル（Kudu）経由で接続するもので、インターネットに直接公開するわけではありません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-custom-container#enable-ssh
+
+- id: c-appsvc-compose-to-sidecar
+  objective: "1.3"
+  type: single
+  difficulty: 2
+  tags: [app-service, docker-compose, sidecar, migration]
+  question: |
+    App Service で Docker Compose（マルチコンテナー）を使って、API と Redis のコンテナーを動かしています。Docker Compose のサポートは廃止予定であることがわかりました。今後の構成として最も適切なものはどれですか。
+  options:
+    - "サイドカー コンテナーの構成に移行する（メイン コンテナー + サイドカー、通信は localhost で行う）"
+    - "Docker Compose を使い続ければ、自動でサイドカーに変換されるので何もしなくてよい"
+    - "App Service をやめて、必ず AKS に移行する"
+    - "Redis のコンテナーをメイン コンテナーのイメージに組み込み、1 つのプロセスで動かす"
+  answer: A
+  explanation: |
+    App Service の Docker Compose（マルチコンテナー）の後継は**サイドカー**です。1 つのメイン コンテナーと最大 9 つのサイドカーを構成し、コンテナー間は同じネットワーク名前空間の `localhost` で通信します。Compose のサービス名による名前解決はできないので、接続先の設定を `localhost:<ポート>` に変える必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/migrate-sidecar-multi-container-apps
+    - https://learn.microsoft.com/azure/app-service/overview-sidecar
+
+- id: c-appsvc-static-outbound
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, outbound-ip, nat-gateway]
+  question: |
+    App Service のアプリから呼ぶ外部のパートナー API は、送信元 IP アドレスの許可リストでアクセスを制限しています。App Service の送信 IP アドレスは複数あり、スケールや価格レベルの変更で変わることがあると聞きました。送信元を 1 つの固定の IP アドレスにしたい場合、最も適切な構成はどれですか。
+  options:
+    - "アプリを VNet 統合し、すべての送信を VNet 経由にして、統合用サブネットに NAT ゲートウェイ（固定のパブリック IP）を関連付ける"
+    - "App Service にプライベート エンドポイントを作成する"
+    - "アプリにカスタム ドメインと TLS 証明書を設定する"
+    - "App Service のアクセス制限でパートナーの IP を許可する"
+  answer: A
+  explanation: |
+    VNet 統合で送信を VNet にルーティングし、統合用サブネットに NAT ゲートウェイを付けると、インターネットへの送信元が NAT ゲートウェイのパブリック IP に固定されます。プライベート エンドポイントやアクセス制限は**受信**の機能で、送信元の IP には影響しません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/networking/nat-gateway-integration
+    - https://learn.microsoft.com/azure/app-service/overview-inbound-outbound-ips
