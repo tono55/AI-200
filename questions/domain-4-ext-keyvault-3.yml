@@ -1,0 +1,383 @@
+# 分野 4 追加問題（3 周目）: Key Vault（4.1）
+
+- id: m-kv-crypto-user
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, keys, cryptography, rbac]
+  question: |
+    会話ログに含まれる個人情報の列を、アプリで暗号化して保存します。暗号鍵（RSA）は Key Vault のキーとして管理し、鍵の秘密部分はアプリに渡したくありません。アプリのマネージド ID に付与するロールと、使う SDK のクライアントの組み合わせとして最も適切なものはどれですか。
+  options:
+    - "Key Vault Crypto User ロールと `CryptographyClient`（暗号化・復号の操作を Key Vault 内で行う）"
+    - "Key Vault Secrets User ロールと `SecretClient`（キーをシークレットとして取得する）"
+    - "Key Vault Administrator ロールと `KeyClient`（キーを取り出してアプリ内で暗号化する）"
+    - "Key Vault Reader ロールと `CertificateClient`"
+  answer: A
+  explanation: |
+    キーの秘密部分は Key Vault（HSM）の外に出さず、`CryptographyClient` で暗号化・復号・署名などの**操作**を Key Vault に依頼します。そのために必要な最小のロールは **Key Vault Crypto User** です。
+    Key Vault Reader は管理プレーンのメタデータを読むだけで、データの操作はできません。Administrator は権限が広すぎます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/keys/about-keys
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+
+- id: m-kv-roles-match
+  objective: "4.1"
+  type: match
+  difficulty: 2
+  tags: [key-vault, rbac]
+  question: |
+    Key Vault（Azure RBAC モデル）で、利用者に割り当てる最小限の組み込みロールを対応付けてください。
+  pairs:
+    - left: "アプリ: シークレットの値を読み取る"
+      right: "Key Vault Secrets User"
+    - left: "ローテーション用の関数: シークレットの新しいバージョンを作成する"
+      right: "Key Vault Secrets Officer"
+    - left: "TLS 証明書の作成・更新・インポートを担当する運用者"
+      right: "Key Vault Certificates Officer"
+    - left: "アプリ: キーを使って署名・暗号化する（キーは取り出さない）"
+      right: "Key Vault Crypto User"
+  distractors:
+    - "Key Vault Contributor"
+  explanation: |
+    データ プレーンのロールは、オブジェクトの種類（シークレット・キー・証明書）と操作（読み取り・使用か、管理か）で分かれています。Key Vault Contributor は管理プレーン（ボールト自体の設定）のロールで、Azure RBAC モデルではシークレットの値は読めません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+
+- id: m-kv-hsm-choice
+  objective: "4.1"
+  type: match
+  difficulty: 3
+  tags: [key-vault, hsm, managed-hsm]
+  question: |
+    要件に合う鍵の保管先を対応付けてください。
+  pairs:
+    - left: "アプリの API キーやパスワードを保存する。HSM は不要"
+      right: "Key Vault（Standard）"
+    - left: "暗号鍵を HSM で保護したい。シークレットや証明書も同じボールトで管理したい"
+      right: "Key Vault（Premium）"
+    - left: "規制により、自社専用（シングル テナント）の HSM で鍵を管理し、鍵の管理権限も完全に分離したい"
+      right: "Managed HSM"
+  distractors:
+    - "App Configuration"
+  explanation: |
+    Key Vault の Standard はソフトウェアで保護されたキー、Premium は HSM で保護されたキーも扱えます。Managed HSM は顧客専用の HSM プールで、キーだけを扱い、より厳しい分離や規制要件に対応します。App Configuration は構成値の保存先で、鍵の保管には使いません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/about-keys-secrets-certificates
+    - https://learn.microsoft.com/azure/key-vault/managed-hsm/overview
+
+- id: m-kv-list-vs-get
+  objective: "4.1"
+  type: yesno
+  difficulty: 3
+  tags: [key-vault, sdk, secrets]
+  question: |
+    Python の `SecretClient` について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`list_properties_of_secrets()` で取得できるのはシークレットのメタデータ（名前、有効期限、タグなど）で、値は含まれない。"
+      answer: true
+    - text: "全シークレットの値を一度に取得する API があるので、起動時にそれを呼べばよい。"
+      answer: false
+    - text: "`get_secret(name)` はバージョンを省略すると、最新の（有効な）バージョンの値を返す。"
+      answer: true
+  explanation: |
+    一覧の API はプロパティだけを返し、値は個別に `get_secret` で取得します。必要なシークレットだけを名前で取得し、適度にキャッシュするのが基本です。バージョンを省略すると現在のバージョンが返るので、ローテーション後の値を自然に取得できます。
+  refs:
+    - https://learn.microsoft.com/python/api/azure-keyvault-secrets/azure.keyvault.secrets.secretclient
+
+- id: m-kv-secret-size
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, limits, secrets]
+  question: |
+    サービス アカウントの JSON キー ファイル（約 2 KB）と、社外システムとの連携用の大きな設定ファイル（約 300 KB、機密情報を含む）を Key Vault のシークレットに保存しようとしたところ、設定ファイルだけ失敗しました。最も適切な対応はどれですか。
+  options:
+    - "シークレットの値の上限（25 KB）を超えているので、設定ファイルは暗号化して Blob Storage に置き、暗号鍵（または Blob への参照）を Key Vault で管理する"
+    - "Key Vault を Premium にすれば保存できる"
+    - "設定ファイルを複数のタグに分割して保存する"
+    - "設定ファイルを証明書としてインポートする"
+  answer: A
+  explanation: |
+    Key Vault のシークレットの値は 25 KB までです。大きな機密データは、Key Vault のキーで保護した暗号化（エンベロープ暗号化）や、ストレージのカスタマー マネージド キーを使って Blob などに保存します。SKU を変えても上限は変わりません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/secrets/about-secrets
+    - https://learn.microsoft.com/azure/key-vault/general/service-limits
+
+- id: m-kv-audit-logs
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, audit, diagnostic-settings]
+  question: |
+    セキュリティ チームから「`db-password` を誰がいつ読んだかを 1 年間追跡できるようにし、想定外の ID からの読み取りを検知したい」と依頼されました。最も適切な構成はどれですか。
+  options:
+    - "Key Vault の診断設定で監査ログ（AuditEvent）を Log Analytics ワークスペースに送り、KQL で `SecretGet` の操作と呼び出し元の ID を調べる（アラート ルールも作成する）"
+    - "Key Vault のアクティビティ ログだけを確認する"
+    - "シークレットにタグを付けて読み取り回数を記録する"
+    - "アプリのログに、取得したシークレットの値を出力する"
+  answer: A
+  explanation: |
+    シークレットの読み取りなどの**データ プレーンの操作**は、診断設定の監査ログ（AuditEvent）に記録されます。アクティビティ ログには、ボールトの作成や設定変更などの管理プレーンの操作しか記録されません。Log Analytics に送ればデータ保持期間を設定でき、KQL で呼び出し元や結果を分析し、アラートにできます。
+    シークレットの値をログに出すのは厳禁です。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/logging
+    - https://learn.microsoft.com/azure/key-vault/general/monitor-key-vault
+
+- id: m-kv-template-deployment
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, bicep, arm, deployment]
+  question: |
+    Bicep で PostgreSQL の管理者パスワードを渡すため、パラメーター ファイルで Key Vault のシークレットを参照（`getSecret`）しています。デプロイすると、Key Vault へのアクセスが拒否されてエラーになります。デプロイを実行する ID には、ボールトに対する適切な権限があります。最も可能性の高い原因はどれですか。
+  options:
+    - "ボールトで「テンプレートのデプロイ用に Azure Resource Manager へのアクセスを有効にする」（`enabledForTemplateDeployment`）が無効になっている"
+    - "シークレットの値が 25 KB を超えている"
+    - "PostgreSQL のファイアウォールが閉じている"
+    - "Bicep ではシークレットを参照できない"
+  answer: A
+  explanation: |
+    テンプレートのデプロイ中に Resource Manager が Key Vault からシークレットを取得するには、ボールトの `enabledForTemplateDeployment` を有効にする必要があります（加えて、デプロイする ID に必要な権限）。こうすれば、パスワードをパラメーター ファイルやパイプラインに平文で置かずに済みます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-resource-manager/bicep/key-vault-parameter
+    - https://learn.microsoft.com/azure/azure-resource-manager/templates/key-vault-parameter
+
+- id: m-kv-cmk-requirements
+  objective: "4.1"
+  type: multiple
+  difficulty: 3
+  tags: [key-vault, cmk, purge-protection]
+  question: |
+    Cosmos DB と Storage のデータを、Key Vault のキーによるカスタマー マネージド キー（CMK）で暗号化します。キーを格納する Key Vault の要件として正しいものを **2 つ**選んでください。
+  options:
+    - "論理的な削除（soft delete）と消去保護（purge protection）が有効になっている"
+    - "サービス（Cosmos DB / Storage）の ID に、キーの取得・ラップ・アンラップができる権限（例: Key Vault Crypto Service Encryption User）を付与する"
+    - "Key Vault のパブリック ネットワーク アクセスを常に有効にしておく"
+    - "キーを毎日手動でエクスポートしてバックアップする"
+  answer: [A, B]
+  explanation: |
+    CMK のキーを誤って削除・消去すると、そのキーで暗号化したデータが二度と読めなくなるため、消去保護が必須です。サービスは自分のマネージド ID で Key Vault のキーを使ってデータ暗号化キーをラップ・アンラップするので、その ID にキーの操作の権限が必要です。
+    ネットワークは、信頼されたサービスやプライベート エンドポイントで制限できます。
+  refs:
+    - https://learn.microsoft.com/azure/storage/common/customer-managed-keys-overview
+    - https://learn.microsoft.com/azure/cosmos-db/how-to-setup-customer-managed-keys
+
+- id: m-kv-cert-private-key
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, certificates, private-key]
+  question: |
+    Key Vault で作成した証明書（キーはエクスポート可能）を、外部 API との相互 TLS に使います。アプリは秘密キーを含む PFX（PKCS#12）が必要です。`CertificateClient.get_certificate()` で取得したものには、公開情報しか含まれていません。秘密キーを含む証明書を取得する正しい方法はどれですか。
+  options:
+    - "証明書と同じ名前のシークレットを `SecretClient.get_secret()` で取得する（証明書のポリシーのコンテンツ タイプに応じて PFX または PEM が返る）"
+    - "`KeyClient.get_key()` でキーを取得して、PFX を自分で組み立てる"
+    - "証明書の秘密キーは Key Vault から取得できないので、証明書を作り直す"
+    - "`CertificateClient.get_certificate_version()` を呼ぶ"
+  answer: A
+  explanation: |
+    Key Vault の証明書は、内部的にキー（秘密キー）とシークレット（秘密キーを含む証明書の本体）を作ります。秘密キー付きの証明書は、**同じ名前のシークレット**として取得します。キーがエクスポート不可の場合は取得できず、署名などはキーの操作として Key Vault 内で行います。取得には証明書ではなくシークレットの読み取り権限が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/certificates/about-certificates
+    - https://learn.microsoft.com/azure/key-vault/certificates/how-to-export-certificate
+
+- id: m-kv-sdk-clients
+  objective: "4.1"
+  type: match
+  difficulty: 2
+  tags: [key-vault, sdk]
+  question: |
+    やりたいことと、使う Key Vault の SDK（Python）のクライアントを対応付けてください。
+  pairs:
+    - left: "API キーの値を取得する"
+      right: "SecretClient（azure-keyvault-secrets）"
+    - left: "新しい RSA キーを作成し、ローテーション ポリシーを設定する"
+      right: "KeyClient（azure-keyvault-keys）"
+    - left: "キーを使ってデータを暗号化・復号する"
+      right: "CryptographyClient（azure-keyvault-keys）"
+    - left: "証明書の発行ポリシーを設定して、証明書を作成する"
+      right: "CertificateClient（azure-keyvault-certificates）"
+  distractors:
+    - "BlobServiceClient"
+  explanation: |
+    Key Vault の SDK はオブジェクトの種類ごとにパッケージとクライアントが分かれています。キーの**管理**（作成・ローテーション）は `KeyClient`、キーを使った**暗号操作**は `CryptographyClient` です。どれも `DefaultAzureCredential` などの資格情報とボールトの URL で作成します。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/developers-guide
+
+- id: m-kv-github-oidc
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, github-actions, oidc]
+  question: |
+    GitHub Actions のワークフローで、デプロイ時に Key Vault のシークレット（外部サービスのトークン）を使います。GitHub のシークレットに長期間有効な資格情報を置かずに済む方法として、最も適切なものはどれですか。
+  options:
+    - "Entra のアプリ（またはユーザー割り当てマネージド ID）に GitHub の OIDC のフェデレーション資格情報を設定し、`azure/login` で OIDC ログインしてから Key Vault のシークレットを取得する（その ID に Key Vault Secrets User を付与）"
+    - "サービス プリンシパルのクライアント シークレットを GitHub のシークレットに保存する"
+    - "Key Vault のシークレットの値を、ワークフローの YAML に直接書く"
+    - "Key Vault のアクセス キーを GitHub のシークレットに保存する"
+  answer: A
+  explanation: |
+    OIDC のフェデレーション資格情報を使うと、ワークフローは実行ごとに GitHub が発行するトークンを Entra のアクセス トークンと交換するので、長期間有効なシークレットを保存する必要がありません。フェデレーションのサブジェクト（リポジトリ、ブランチ、環境）で、どのワークフローがその ID を使えるかを制限できます。
+    Key Vault のデータ アクセスに「アクセス キー」はありません。
+  refs:
+    - https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect
+    - https://learn.microsoft.com/entra/workload-id/workload-identity-federation
+
+- id: m-kv-disabled-secret
+  objective: "4.1"
+  type: yesno
+  difficulty: 3
+  tags: [key-vault, secrets, enabled]
+  question: |
+    漏えいの疑いがある外部 API キーのシークレット `ext-api-key` を、削除せずに一時的に使えなくするため、`enabled` を false にしました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "無効にしたシークレットの値を `get_secret` で取得しようとすると、エラー（403）になる。"
+      answer: true
+    - text: "無効にしても、シークレットのメタデータ（名前やタグ）は一覧で確認できる。"
+      answer: true
+    - text: "無効にすると、外部サービス側でもその API キーが自動で失効する。"
+      answer: false
+  explanation: |
+    シークレットを無効にすると、値の取得はできなくなりますが、メタデータは残り、再び有効にできます。ただし Key Vault のシークレットを無効にしても、発行元の外部サービスでキーが失効するわけではありません。漏えい時は、発行元でキーを無効化・再発行し、新しい値を Key Vault に保存します。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/secrets/about-secrets
+
+- id: m-kv-csi-rotation
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, aks, csi-driver, rotation]
+  question: |
+    AKS で Secrets Store CSI ドライバー（自動ローテーション有効）を使い、Key Vault のシークレットを Kubernetes の Secret に同期して、Pod の環境変数（`secretKeyRef`）に渡しています。Key Vault でシークレットを更新したあと、マウントされたファイルと Kubernetes の Secret は更新されましたが、アプリは古い値を使い続けています。最も適切な説明はどれですか。
+  options:
+    - "環境変数はコンテナーの起動時に決まるので、Secret が更新されても変わらない。ファイルのマウントから読むようにアプリを変えるか、更新時に Pod を再起動（ロールアウト）する"
+    - "自動ローテーションは Kubernetes の Secret を更新しない"
+    - "Key Vault のシークレットのバージョンを指定していないため"
+    - "CSI ドライバーは 24 時間に 1 回しかシークレットを確認しない"
+  answer: A
+  explanation: |
+    CSI ドライバーのローテーションは、ポーリングの間隔ごとにマウントされたファイルと同期した Secret を更新します。しかし、環境変数は Pod の起動時に設定されるので、実行中のプロセスには反映されません。ファイルを監視して読み直す実装にするか、Secret の変更時に Pod を再起動する仕組み（ロールアウト）を用意します。
+  refs:
+    - https://learn.microsoft.com/azure/aks/csi-secrets-store-configuration-options
+
+- id: m-kv-prefer-identity
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, managed-identity, design]
+  question: |
+    新しい RAG アプリで、Cosmos DB のアカウント キーと Service Bus の接続文字列を Key Vault に保存し、アプリはマネージド ID で Key Vault から取得して接続する設計が提案されました。セキュリティの観点から、より良い設計はどれですか。
+  options:
+    - "Cosmos DB と Service Bus は Entra ID 認証に対応しているので、アプリのマネージド ID に各サービスのデータ ロールを直接付与し、キーや接続文字列を使わない（可能ならローカル認証を無効にする）"
+    - "キーを Key Vault ではなく App Configuration に保存する"
+    - "キーをアプリの環境変数に直接設定する"
+    - "提案どおりでよく、これ以上改善する余地はない"
+  answer: A
+  explanation: |
+    Key Vault はキーを安全に保管できますが、キーそのものが存在する限り、漏えいやローテーションの手間が残ります。Entra ID 認証に対応したサービスでは、マネージド ID とロールで直接アクセスし、キーを使わないのが最善です。Key Vault は、Entra ID に対応していない外部サービスの API キーなど、どうしても必要なシークレットに使います。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/best-practices
+    - https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview
+
+- id: m-kv-secret-naming
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, naming, configuration]
+  question: |
+    .NET のアプリで、構成キー `Database:Password` の値を Key Vault の構成プロバイダーから読み込みたいです。シークレット名に `:` や `_` は使えません。シークレットの名前をどうしますか。
+  options:
+    - "`Database--Password`（構成プロバイダーが `--` を `:` に変換する）"
+    - "`Database:Password`"
+    - "`Database_Password`"
+    - "`Database.Password`"
+  answer: A
+  explanation: |
+    Key Vault のシークレット名には英数字とハイフンしか使えません。.NET の Key Vault 構成プロバイダーは、シークレット名の `--` を構成キーの区切り文字 `:` に置き換えるので、`Database--Password` で `Database:Password` として読み込めます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/about-keys-secrets-certificates#object-identifiers
+    - https://learn.microsoft.com/aspnet/core/security/key-vault-configuration
+
+- id: m-kv-rbac-delay
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, rbac, troubleshooting]
+  question: |
+    デプロイのスクリプトで、Container Apps のマネージド ID に Key Vault Secrets User を割り当てた直後にアプリを起動すると、最初の数分だけシークレットの取得が 403 になり、その後は成功します。最も適切な説明と対処はどれですか。
+  options:
+    - "ロールの割り当てが反映されるまでに数分かかることがある。割り当てを先に行ってから時間をおく、またはアプリ側で一時的な 403 を再試行する"
+    - "Key Vault のスロットリングなので、SKU を Premium にする"
+    - "Key Vault のファイアウォールが原因なので、無効にする"
+    - "ロールの割り当てが失敗しているので、Owner を付与する"
+  answer: A
+  explanation: |
+    Azure RBAC のロールの割り当ては、作成してから実際の認可に反映されるまで数分かかることがあります。インフラのデプロイでは、ID の作成とロールの割り当てをアプリのデプロイより前に行い、起動時の取得には再試行を入れておくと安定します。権限を広げても反映の遅れは解決しません。
+  refs:
+    - https://learn.microsoft.com/azure/role-based-access-control/troubleshooting
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+
+- id: m-kv-envelope
+  objective: "4.1"
+  type: order
+  difficulty: 3
+  tags: [key-vault, envelope-encryption]
+  question: |
+    数 MB の機密ファイルを、Key Vault のキー（KEK）を使った**エンベロープ暗号化**で Blob に保存します。保存時の処理を正しい順に並べてください。
+  items:
+    - "アプリでランダムなデータ暗号化キー（DEK、例: AES 256 ビット）を生成する"
+    - "DEK でファイルをアプリ内で暗号化する"
+    - "Key Vault のキー（KEK）で DEK をラップ（`wrap_key`）する"
+    - "暗号化したファイルと、ラップした DEK（とキーの識別子）を一緒に保存する"
+  distractors:
+    - "ファイル全体を Key Vault に送って暗号化してもらう"
+  explanation: |
+    Key Vault の暗号操作は小さなデータ向けなので、大きなデータはアプリ内で DEK を使って暗号化し、DEK だけを Key Vault の KEK でラップします。復号時は、ラップされた DEK を Key Vault でアンラップしてからファイルを復号します。KEK をローテーションしても、DEK を再ラップするだけで済みます。
+  refs:
+    - https://learn.microsoft.com/azure/security/fundamentals/encryption-atrest
+    - https://learn.microsoft.com/azure/key-vault/keys/about-keys-details
+
+- id: m-kv-dev-access
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, firewall, development]
+  question: |
+    開発用の Key Vault でファイアウォールを有効にし、選択したネットワークからのアクセスだけを許可しています。在宅勤務の開発者が、ローカルで `DefaultAzureCredential` を使ってシークレットを読もうとすると、`ForbiddenByFirewall` のエラーになります。開発者のアカウントには Key Vault Secrets User が付与されています。最も適切な対処はどれですか。
+  options:
+    - "開発者の送信元の IP アドレスをファイアウォールの許可リストに追加する（または VPN やプライベート エンドポイント経由で接続する）"
+    - "開発者に Key Vault Administrator を付与する"
+    - "`DefaultAzureCredential` をやめて、アクセス キーを使う"
+    - "シークレットの有効期限を延ばす"
+  answer: A
+  explanation: |
+    `ForbiddenByFirewall` は認可（ロール）ではなくネットワークの拒否です。ロールを強くしても解決しません。許可する IP アドレスを追加するか、社内ネットワークや VPN 経由でプライベート エンドポイントに接続します。本番と開発でボールトを分け、本番のネットワークは厳しく保ちます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/network-security
+
+- id: m-kv-cli-value
+  objective: "4.1"
+  type: dropdown
+  difficulty: 2
+  tags: [key-vault, azure-cli]
+  question: |
+    デプロイ スクリプトで、シークレット `ext-api-key` の値だけを変数に取り出します。コマンドを完成させてください。
+  language: bash
+  template: |
+    API_KEY=$(az keyvault secret {{1}} --vault-name kv-rag-prod \
+      --name ext-api-key --query {{2}} -o {{3}})
+  blanks:
+    "1":
+      options: ["show", "list", "download", "get"]
+      answer: "show"
+    "2":
+      options: ["value", "id", "attributes", "name"]
+      answer: "value"
+    "3":
+      options: ["tsv", "json", "table", "yaml"]
+      answer: "tsv"
+  explanation: |
+    `az keyvault secret show` はシークレットの値と属性を返します。`--query value` で値だけを取り出し、`-o tsv` で引用符のない文字列として出力すると、そのまま変数に入れられます。スクリプトでは値をログに出力しないよう注意します（`set -x` などに注意）。
+  refs:
+    - https://learn.microsoft.com/cli/azure/keyvault/secret
