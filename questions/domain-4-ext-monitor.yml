@@ -1,0 +1,511 @@
+# 分野 4 追加問題: OpenTelemetry（4.3）と KQL（4.4）
+
+# ---------- 4.3 ----------
+- id: m-otel-broken-trace
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, context-propagation]
+  question: |
+    API は独自の HTTP クライアントで社内のメッセージ キューにジョブを送り、ワーカーはそれを受け取って処理します。両方とも OpenTelemetry で計装していますが、Application Insights では API とワーカーが**別々のトレース**として表示され、つながりません。最も適切な対処はどれですか。
+  options:
+    - "送信時に現在のトレース コンテキストを伝搬形式（W3C `traceparent`）でメッセージのプロパティに注入（inject）し、受信時に取り出して（extract）親として新しいスパンを開始する"
+    - "API とワーカーで別々の Application Insights を使う"
+    - "サンプリングを無効にする"
+    - "ワーカーのログ レベルを DEBUG にする"
+  answer: A
+  explanation: |
+    サービスをまたいでトレースをつなぐには、**コンテキスト伝搬**が必要です。HTTP や Azure SDK（Service Bus など）は計装ライブラリが自動で行いますが、独自のプロトコルでは OpenTelemetry のプロパゲーターで inject / extract します。
+  refs:
+    - https://opentelemetry.io/docs/concepts/context-propagation/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-spankind-match
+  objective: "4.3"
+  type: match
+  difficulty: 2
+  tags: [opentelemetry, span-kind]
+  question: |
+    処理の種類と、適切な SpanKind を対応付けてください。
+  pairs:
+    - left: "Web API が受け取った HTTP リクエストの処理"
+      right: "SERVER"
+    - left: "API から PostgreSQL や LLM への呼び出し"
+      right: "CLIENT"
+    - left: "Service Bus へのメッセージ送信"
+      right: "PRODUCER"
+    - left: "ワーカーによるメッセージの受信・処理"
+      right: "CONSUMER"
+  distractors:
+    - "BATCH"
+  explanation: |
+    SpanKind は、Application Insights のテーブル（SERVER / CONSUMER → requests、CLIENT / PRODUCER / INTERNAL → dependencies）やアプリケーション マップの描画に影響します。内部の処理は INTERNAL です。
+  refs:
+    - https://opentelemetry.io/docs/concepts/signals/traces/#span-kind
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-service-name
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, resource, application-map]
+  question: |
+    3 つのコンテナー アプリを同じ Application Insights に送っていますが、アプリケーション マップで区別しにくい名前になっています。コードを変えずに、各アプリの名前を `rag-api`、`rag-worker`、`rag-web` と表示させたいです。何を設定しますか。
+  options:
+    - "各アプリに環境変数 `OTEL_SERVICE_NAME`（リソース属性 `service.name`）を設定する"
+    - "Application Insights を 3 つに分ける"
+    - "スパン名にアプリ名を付ける"
+    - "Log Analytics のテーブル名を変える"
+  answer: A
+  explanation: |
+    リソース属性 `service.name` は Application Insights の `cloud_RoleName` になり、アプリケーション マップのノード名として使われます。標準の環境変数 `OTEL_SERVICE_NAME`（または `OTEL_RESOURCE_ATTRIBUTES`）で設定できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+
+- id: m-otel-custom-metric
+  objective: "4.3"
+  type: dropdown
+  difficulty: 3
+  tags: [opentelemetry, metrics, python]
+  question: |
+    LLM の呼び出しごとに使ったトークン数を、モデル名ごとに合計できるメトリックとして記録したいです。サンプリングの影響を受けないようにします。コードを完成させてください。
+  language: python
+  template: |
+    from opentelemetry import metrics
+
+    meter = metrics.{{1}}("rag-api")
+    token_counter = meter.{{2}}("llm.tokens", unit="{token}", description="Tokens used")
+
+    def record(model: str, tokens: int):
+        token_counter.{{3}}(tokens, {"model": model})
+  blanks:
+    "1": {options: [get_meter, get_tracer, get_logger], answer: get_meter}
+    "2": {options: [create_counter, create_histogram, start_as_current_span], answer: create_counter}
+    "3": {options: [add, record, set_attribute], answer: add}
+  explanation: |
+    メトリックは `Meter` から作成し、増え続ける量にはカウンター（`add`）、分布（応答時間など）にはヒストグラム（`record`）を使います。メトリックはサンプリングされず、Application Insights の `customMetrics` に入るため、アラートの対象に向いています。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+    - https://opentelemetry.io/docs/languages/python/instrumentation/#metrics
+
+- id: m-otel-attr-event-log
+  objective: "4.3"
+  type: match
+  difficulty: 3
+  tags: [opentelemetry, spans]
+  question: |
+    記録したい情報と、OpenTelemetry での記録方法を対応付けてください。
+  pairs:
+    - left: "このスパンで検索した件数や使ったインデックス名（スパン全体の性質）"
+      right: "スパンの属性（set_attribute）"
+    - left: "スパンの途中で起きた「キャッシュ ミス」などの時刻付きの出来事"
+      right: "スパン イベント（add_event）"
+    - left: "スパンに関係なく残したい運用メッセージ"
+      right: "ログ（logging。スパン内なら trace ID が付く）"
+  distractors:
+    - "リソース属性"
+  explanation: |
+    属性はスパンを検索・集計するためのキーと値、イベントはスパン内の特定時刻の出来事、ログは独立したレコードです。スパンの中で出したログにはトレース ID / スパン ID が付くので、`operation_Id` でトレースと関連付けられます。
+  refs:
+    - https://opentelemetry.io/docs/concepts/signals/traces/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-pii
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, privacy, cost]
+  question: |
+    デバッグのため、ユーザーのプロンプト全文と LLM の応答全文をスパンの属性に記録しています。セキュリティ レビューで指摘を受けました。最も適切な改善はどれですか。
+  options:
+    - "全文は記録せず、長さ・トークン数・ハッシュや要求 ID などを属性にする。必要ならスパン プロセッサで機密情報を除去・マスクしてからエクスポートする"
+    - "サンプリング率を 100% にする"
+    - "Application Insights の保持期間を延ばす"
+    - "全文をスパン イベントに移す"
+  answer: A
+  explanation: |
+    テレメトリに個人情報や機密情報を入れると、アクセス権の広い監視基盤に漏れ、保存コストも増えます。必要最小限の情報にし、スパン プロセッサ（`span_processors`）でエクスポート前にフィルタリングできます。イベントに移しても問題は同じです。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-filter
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-disable-instrumentation
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, instrumentation, python]
+  question: |
+    Azure Monitor OpenTelemetry Distro（Python）を使っています。psycopg2 の自動計装が SQL ごとに大量の依存関係を記録し、コストが増えています。この計装だけを無効にするには、どうしますか。
+  options:
+    - "環境変数 `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=psycopg2` を設定する（または `configure_azure_monitor` の `instrumentation_options` で無効化する）"
+    - "`configure_azure_monitor()` の呼び出しを削除する"
+    - "Application Insights のテーブル `dependencies` を削除する"
+    - "PostgreSQL のログを無効にする"
+  answer: A
+  explanation: |
+    ディストロは主要なライブラリを自動で計装しますが、ライブラリ単位で無効にできます。全体のトレースを止めずに、ノイズの多い計装だけを外せます。サンプリングの調整もコスト削減に有効です。
+  refs:
+    - https://learn.microsoft.com/python/api/overview/azure/monitor-opentelemetry-readme
+
+- id: m-otel-sampling-choice
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, sampling]
+  question: |
+    1 日に数千リクエストしかない社内 API で、Application Insights のトレースの一部しか見えず、障害調査で困っています。Azure Monitor のディストロの設定は既定のままです。最も適切な対処はどれですか。
+  options:
+    - "既定のレート制限サンプリング（1 秒あたり 5 トレース）を見直し、トラフィックが少ないなら固定割合 1.0（100%）など必要な量を送る設定にする"
+    - "Application Insights を作り直す"
+    - "ログ レベルを WARNING にする"
+    - "メトリックのエクスポートを無効にする"
+  answer: A
+  explanation: |
+    ディストロの既定はレート制限サンプリング（1 秒あたり 5 トレース）です。瞬間的に集中するとそれを超えた分は捨てられます。量が少ないアプリや調査期間は、`OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` で固定割合（例: 1.0）などに変更します。コストとのトレードオフです。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-sampling
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+
+- id: m-otel-collector
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, collector, otlp]
+  question: |
+    同じテレメトリを Azure Monitor と、別チームが使う OTLP 対応の監視基盤の両方に送りたいです。また、エクスポート先を変えるたびにアプリを再デプロイしたくありません。最も適切な構成はどれですか。
+  options:
+    - "アプリは OTLP で OpenTelemetry Collector に送り、Collector のパイプラインで Azure Monitor と他の基盤にエクスポートする"
+    - "アプリに 2 つのディストロ（Azure Monitor 用と別の基盤用）を同時に初期化する"
+    - "Application Insights のデータを毎晩エクスポートする"
+    - "OpenTelemetry では複数の送信先に送ることはできない"
+  answer: A
+  explanation: |
+    **OpenTelemetry Collector** は、受信したテレメトリを加工・フィルタリングして複数の送信先にエクスポートできます。送信先の変更を Collector の設定で吸収でき、ベンダー非依存という OpenTelemetry の利点を活かせます。
+  refs:
+    - https://opentelemetry.io/docs/collector/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-overview
+
+- id: m-otel-log-correlation
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, logs, correlation]
+  question: |
+    ある失敗したリクエストについて、その処理中に出力された Python のログだけを Application Insights で見たいです。Azure Monitor のディストロで logging を計装している場合、どうやって絞り込みますか。
+  options:
+    - "スパンの中で出力したログにはトレース ID が付くので、`traces` テーブルを失敗した要求と同じ `operation_Id` で絞り込む"
+    - "ログの時刻だけで推測する"
+    - "ログとトレースは関連付けられないので、ログにリクエスト ID を手で入れる以外に方法はない"
+    - "`customMetrics` テーブルを見る"
+  answer: A
+  explanation: |
+    OpenTelemetry のログはアクティブなスパンのコンテキスト（トレース ID / スパン ID）を持つため、Application Insights では `operation_Id` で要求・依存関係・例外・ログを関連付けられます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-facts
+  objective: "4.3"
+  type: yesno
+  difficulty: 3
+  tags: [opentelemetry]
+  question: |
+    OpenTelemetry と Azure Monitor について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "Azure Monitor のディストロは、HTTP サーバー・HTTP クライアント・Azure SDK などのライブラリを自動で計装する。"
+      answer: true
+    - text: "Application Insights に送るには、インストルメンテーション キーではなく接続文字列を使うのが推奨である。"
+      answer: true
+    - text: "1 つのトレースは、複数のサービスにまたがるスパンで構成されることがある。"
+      answer: true
+    - text: "スパンに `record_exception()` するだけで、スパンのステータスも自動で ERROR になる。"
+      answer: false
+  explanation: |
+    `record_exception()` は例外をスパン イベントとして記録するだけで、ステータスは変わりません。失敗として扱うには `set_status(StatusCode.ERROR)` も設定します（計装ライブラリが自動で行う場合もある）。
+  refs:
+    - https://opentelemetry.io/docs/languages/python/instrumentation/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable
+
+# ---------- 4.4 ----------
+- id: m-kql-make-series
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, time-series]
+  question: |
+    5 分ごとのエラー数をグラフにしたところ、エラーがなかった時間帯が「0」ではなく線でつながってしまい、傾向を誤解しやすいです。エラーのない時間帯を 0 として扱うには、どの演算子を使いますか。
+  options:
+    - "`make-series count() default=0 on timestamp from ago(1d) to now() step 5m`"
+    - "`summarize count() by bin(timestamp, 5m)` のまま `render piechart`"
+    - "`take 288`"
+    - "`project timestamp`"
+  answer: A
+  explanation: |
+    `summarize ... by bin()` は**データがある区間だけ**行を作ります。`make-series` は指定した範囲のすべての区間を作り、データがない区間を `default` の値（0 など）で埋めます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/make-series-operator
+
+- id: m-kql-leftouter
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, join]
+  question: |
+    直近 1 時間のすべてのリクエストについて、例外があれば例外の種類も並べて表示したいです（例外のないリクエストも結果に残す）。正しい結合はどれですか。
+  options:
+    - "`requests | join kind=leftouter (exceptions) on operation_Id`"
+    - "`requests | join kind=inner (exceptions) on operation_Id`"
+    - "`exceptions | join kind=inner (requests) on timestamp`"
+    - "`union requests, exceptions`"
+  answer: A
+  explanation: |
+    `leftouter` は左側（requests）のすべての行を残し、一致する右側がなければ空の列にします。`inner` は両方に一致する行だけになるので、例外のないリクエストが消えます。`union` は行を縦に連結するだけで結合しません。
+  refs:
+    - https://learn.microsoft.com/kusto/query/join-operator
+
+- id: m-kql-has-contains
+  objective: "4.4"
+  type: yesno
+  difficulty: 3
+  tags: [kql, string-operators]
+  question: |
+    `message` 列の値が `"Embedding failed: RateLimitError from openai"` の行について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`where message has \"failed\"` に一致する。"
+      answer: true
+    - text: "`where message has \"Limit\"` に一致する。"
+      answer: false
+    - text: "`where message contains \"Limit\"` に一致する。"
+      answer: true
+    - text: "大量のログを検索するときは、目的を満たすなら `contains` より `has` の方が一般に高速である。"
+      answer: true
+  explanation: |
+    `has` は**単語（語）単位**の一致で、インデックスを使えるため高速です。`RateLimitError` は 1 つの語なので、その一部の `Limit` は `has` では一致しません。部分文字列の一致には `contains` を使いますが、遅くなります（大文字小文字は既定で区別しない）。
+  refs:
+    - https://learn.microsoft.com/kusto/query/datatypes-string-operators
+
+- id: m-kql-customdimensions
+  objective: "4.4"
+  type: dropdown
+  difficulty: 3
+  tags: [kql, custom-dimensions]
+  question: |
+    スパンの属性 `rag.top_k`（整数）は、Application Insights の `dependencies` の `customDimensions` に入っています。属性の値ごとの平均時間を出す KQL を完成させてください。
+  language: kusto
+  template: |
+    dependencies
+    | where name == "rag.retrieve"
+    | {{1}} topK = {{2}}(customDimensions["rag.top_k"])
+    | summarize avg(duration) by topK
+    | {{3}} topK asc
+  blanks:
+    "1": {options: [extend, project-away, summarize], answer: extend}
+    "2": {options: [toint, tostring, todatetime], answer: toint}
+    "3": {options: [order by, top, take], answer: order by}
+  explanation: |
+    `customDimensions` は動的型（dynamic）で、値は文字列として入っていることが多いため、`toint()` などで型変換してから集計・並べ替えします。`extend` は列を追加します。
+  refs:
+    - https://learn.microsoft.com/kusto/query/extend-operator
+    - https://learn.microsoft.com/kusto/query/toint-function
+
+- id: m-kql-top-vs-take
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql]
+  question: |
+    直近 1 時間で最も遅かったリクエスト 5 件を確認したいです。正しいクエリはどれですか。
+  options:
+    - "`requests | where timestamp > ago(1h) | top 5 by duration desc`"
+    - "`requests | where timestamp > ago(1h) | take 5`"
+    - "`requests | take 5 | where timestamp > ago(1h)`"
+    - "`requests | summarize max(duration) | take 5`"
+  answer: A
+  explanation: |
+    `take`（`limit`）は**順序を保証しない**任意の 5 行を返します。上位 N 件には `top N by 列` を使います（`order by ... | take N` と同等）。
+  refs:
+    - https://learn.microsoft.com/kusto/query/top-operator
+    - https://learn.microsoft.com/kusto/query/take-operator
+
+- id: m-kql-llm-429
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, dependencies, troubleshooting]
+  question: |
+    回答の遅延が増えた原因が、LLM の API のレート制限ではないかを確かめたいです。Application Insights で、外部呼び出しの失敗を宛先と結果コードごとに数える KQL として最も適切なものはどれですか。
+  options:
+    - "`dependencies | where timestamp > ago(1h) and success == false | summarize count() by target, resultCode | order by count_ desc`"
+    - "`requests | where resultCode == 200 | count`"
+    - "`traces | where message has \"slow\" | take 10`"
+    - "`customMetrics | summarize sum(value)`"
+  answer: A
+  explanation: |
+    外部サービス（LLM、DB）への呼び出しは `dependencies` に記録され、`target`（宛先）と `resultCode` で失敗の傾向を把握できます。429 が多ければ、レート制限への対策（再試行のバックオフ、同時実行の制御、クォータの増加）を検討します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/data-model-complete
+
+- id: m-kql-arg-max
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, summarize]
+  question: |
+    各コンテナー アプリのリビジョンについて、**最後に**出力されたシステム ログの行（全列）だけを表示したいです。最も適切な集計はどれですか。
+  options:
+    - "`summarize arg_max(TimeGenerated, *) by RevisionName_s`"
+    - "`summarize max(TimeGenerated) by RevisionName_s`"
+    - "`top 1 by TimeGenerated`"
+    - "`distinct RevisionName_s`"
+  answer: A
+  explanation: |
+    `arg_max(列, *)` は、グループごとに指定した列が最大の行の**すべての列**を返します。`max()` は最大値そのものしか返さず、`top 1` は全体で 1 行だけです。
+  refs:
+    - https://learn.microsoft.com/kusto/query/arg-max-aggregation-function
+
+- id: m-kql-dcount-users
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, impact]
+  question: |
+    障害の影響範囲を報告するため、直近 1 時間に失敗したリクエストを受けた**ユーザーの数**を求めたいです。正しいクエリはどれですか。
+  options:
+    - "`requests | where timestamp > ago(1h) and success == false | summarize dcount(user_Id)`"
+    - "`requests | where success == false | count`"
+    - "`requests | summarize count() by user_Id`"
+    - "`requests | where success == false | take 1`"
+  answer: A
+  explanation: |
+    `dcount()` は重複を除いた数（近似）を返します。`count` は失敗したリクエストの件数で、同じユーザーの複数回の失敗も数えてしまいます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/dcount-aggregation-function
+
+- id: m-kql-percentiles
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, latency]
+  question: |
+    操作ごとに p50・p95・p99 の応答時間を一度に出したいです。最も簡潔な書き方はどれですか。
+  options:
+    - "`requests | summarize percentiles(duration, 50, 95, 99) by name`"
+    - "`requests | summarize avg(duration), max(duration) by name`"
+    - "`requests | top 99 by duration`"
+    - "`requests | summarize percentile(duration) by name`"
+  answer: A
+  explanation: |
+    `percentiles(列, p1, p2, ...)` で複数のパーセンタイルを一度に計算できます（結果の列名は `percentile_duration_95` など）。平均は外れ値に引っ張られるため、遅延の評価にはパーセンタイルを使います。
+  refs:
+    - https://learn.microsoft.com/kusto/query/percentiles-aggregation-function
+
+- id: m-kql-filter-early
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, performance]
+  question: |
+    次のクエリが遅く、タイムアウトすることがあります。最も効果的な書き換えはどれですか。
+
+    ```kusto
+    requests
+    | join kind=inner (exceptions) on operation_Id
+    | extend hour = bin(timestamp, 1h)
+    | where timestamp > ago(1h) and cloud_RoleName == "rag-api"
+    ```
+  options:
+    - "`join` の前に、両方のテーブルを `where timestamp > ago(1h)` などで絞り込んでから結合する"
+    - "`join` を `union` に変える"
+    - "`extend` を最初に移動する"
+    - "クエリの最後に `take 100` を付ける"
+  answer: A
+  explanation: |
+    KQL ではできるだけ早い段階で `where`（特に時間の条件）で行を減らすのが基本です。結合の前に両側を絞り込むと、処理するデータ量が大きく減ります。
+  refs:
+    - https://learn.microsoft.com/kusto/query/best-practices
+
+- id: m-kql-let-threshold
+  objective: "4.4"
+  type: dropdown
+  difficulty: 2
+  tags: [kql, let]
+  question: |
+    閾値を変数にして、直近 30 分で p95 が閾値を超えた操作を一覧するクエリを完成させてください。
+  language: kusto
+  template: |
+    {{1}} threshold = 2000;
+    requests
+    | where timestamp > ago(30m)
+    | summarize p95 = percentile(duration, 95) by name
+    | where p95 > {{2}}
+    | {{3}} name, p95
+  blanks:
+    "1": {options: [let, set, declare], answer: let}
+    "2": {options: [threshold, "@threshold", "$threshold"], answer: threshold}
+    "3": {options: [project, extend, summarize], answer: project}
+  explanation: |
+    `let` で変数（スカラー値やテーブル式）を定義し、セミコロンで区切ります。`project` で出力する列を選びます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/let-statement
+
+- id: m-kql-alert
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, alerts]
+  question: |
+    「直近 5 分間に `rag-api` の失敗率が 5% を超えたら、担当チームにメールと Teams で通知する」を実現したいです。最も適切な構成はどれですか。
+  options:
+    - "失敗率を計算する KQL のログ検索アラート ルール（評価頻度 5 分、しきい値 5）を作り、通知先のアクション グループを指定する"
+    - "ブックを作り、担当者が 5 分ごとに見る"
+    - "Live Metrics を常に表示しておく"
+    - "Application Insights のサンプリングを 100% にする"
+  answer: A
+  explanation: |
+    KQL の結果に基づいて通知するには**ログ検索アラート**を使い、通知や自動処理は**アクション グループ**（メール、SMS、Webhook、Functions、Logic Apps など）で定義します。単純な数値ならメトリック アラートの方が低遅延・低コストです。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-types
+    - https://learn.microsoft.com/azure/azure-monitor/alerts/action-groups
+
+- id: m-kql-failure-rate-calc
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, calculation]
+  question: |
+    次のクエリの結果、ある 5 分間の `total` が 400、`failed` が 18 でした。`failureRate` の値はいくつですか。
+
+    ```kusto
+    requests
+    | summarize total = count(), failed = countif(success == false) by bin(timestamp, 5m)
+    | extend failureRate = round(100.0 * failed / total, 1)
+    ```
+  options:
+    - "4.5"
+    - "0.045"
+    - "18"
+    - "0（整数の割り算になるため）"
+  answer: A
+  explanation: |
+    `100.0 * 18 / 400 = 4.5` です。`100.0`（実数）を掛けているので整数の割り算にはなりません。`100 * failed / total` と整数だけで計算すると、KQL では整数の除算になり小数点以下が切り捨てられる点に注意します。
+  refs:
+    - https://learn.microsoft.com/kusto/query/countif-aggregation-function
+
+- id: m-kql-order-pipeline
+  objective: "4.4"
+  type: order
+  difficulty: 3
+  tags: [kql, pipeline]
+  question: |
+    「直近 24 時間の `rag-worker` の例外を、種類ごとに件数を数え、多い順に 10 種類を表示する」KQL をパイプの順に並べてください。
+  items:
+    - "exceptions"
+    - "| where timestamp > ago(24h) and cloud_RoleName == \"rag-worker\""
+    - "| summarize count() by type"
+    - "| top 10 by count_ desc"
+  distractors:
+    - "| render timechart"
+  explanation: |
+    テーブル → 絞り込み → 集計 → 上位の順です。`summarize count()` の結果の列名は `count_` になります。種類ごとの件数は時系列ではないため、`timechart` は不要です。
+  refs:
+    - https://learn.microsoft.com/kusto/query/summarize-operator
+    - https://learn.microsoft.com/kusto/query/top-operator
