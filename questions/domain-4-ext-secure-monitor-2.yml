@@ -1,0 +1,333 @@
+# 分野 4 追加問題（2 周目）: Key Vault / App Configuration / OpenTelemetry / KQL
+
+# ---------- 4.1 ----------
+- id: m-kv-firewall-trusted
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, firewall, app-service]
+  question: |
+    Key Vault のファイアウォールを有効にし、「信頼された Microsoft サービスによるこのファイアウォールのバイパスを許可する」をオンにしました。ところが、App Service（VNet 統合なし）のアプリ設定の Key Vault 参照が解決できなくなりました。最も適切な対処はどれですか。
+  options:
+    - "App Service を VNet 統合し、Key Vault のプライベート エンドポイント（またはサービス エンドポイントで許可したサブネット）経由でアクセスさせる"
+    - "Key Vault の消去保護を無効にする"
+    - "Key Vault の権限モデルをアクセス ポリシーに変更する"
+    - "Key Vault 参照にシークレットのバージョンを含める"
+  answer: A
+  explanation: |
+    「信頼された Microsoft サービス」に含まれるのは決められたサービスの特定のシナリオだけで、App Service や Container Apps などのアプリからのアクセスは含まれません。ファイアウォールを有効にした Key Vault には、VNet 統合したうえで、プライベート エンドポイントや許可したサブネット（サービス エンドポイント）からアクセスさせます。
+    権限モデルやバージョン指定は認可や値の選択の話で、ネットワークで拒否されている問題は解決しません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/overview-vnet-service-endpoints
+    - https://learn.microsoft.com/azure/app-service/app-service-key-vault-references
+
+- id: m-kv-access-policy-model
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, rbac, access-policy]
+  question: |
+    アプリのマネージド ID に、Key Vault のスコープで「Key Vault Secrets User」ロールを割り当てました。しかし、シークレットの取得は 403（Forbidden）のままです。Key Vault の「アクセス構成」を見ると、権限モデルが「コンテナーのアクセス ポリシー」になっています。原因と対処として正しいものはどれですか。
+  options:
+    - "アクセス ポリシー モデルでは Azure RBAC のデータ プレーン ロールは評価されない。権限モデルを Azure RBAC に切り替える（既存のアクセス ポリシーの移行を計画したうえで）か、アクセス ポリシーで Get を許可する"
+    - "ロールの反映には 24 時間かかるので待つ"
+    - "Key Vault Secrets User ではなく Contributor（共同作成者）を割り当てる"
+    - "シークレットを証明書として保存し直す"
+  answer: A
+  explanation: |
+    Key Vault のデータ プレーン（シークレットの読み取りなど）の認可は、**アクセス ポリシー**か **Azure RBAC** のどちらかの権限モデルで行われ、アクセス ポリシー モデルのときは RBAC のデータ ロールは使われません。新規には Azure RBAC が推奨です。切り替えると既存のアクセス ポリシーは効かなくなるので、必要なロールを先に割り当ててから切り替えます。
+    Contributor は管理プレーンのロールで、シークレットの値を読む権限は含みません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-migration
+
+- id: m-kv-default-credential
+  objective: "4.1"
+  type: yesno
+  difficulty: 2
+  tags: [key-vault, defaultazurecredential, local-development]
+  question: |
+    アプリは `DefaultAzureCredential` で Key Vault からシークレットを取得します。本番は Container Apps のマネージド ID、開発者はローカルの PC で `az login` 済みです。次の記述が正しいかを答えてください。
+  statements:
+    - text: "同じコードのまま、本番ではマネージド ID、ローカルでは開発者の Azure CLI の資格情報でアクセスできる。"
+      answer: true
+    - text: "ローカルで動かすには、開発者のユーザー アカウント（またはグループ）にも Key Vault のデータ ロールが必要である。"
+      answer: true
+    - text: "ローカル開発のためには、Key Vault のアクセス キーを `.env` に置く必要がある。"
+      answer: false
+    - text: "本番でユーザー割り当てマネージド ID を使う場合は、`AZURE_CLIENT_ID` などでどの ID を使うかを指定する。"
+      answer: true
+  explanation: |
+    `DefaultAzureCredential` は、環境変数・ワークロード ID・マネージド ID・開発ツール（Azure CLI など）の資格情報を順に試すので、環境ごとにコードを変える必要がありません。ローカルでは開発者自身の ID で認証されるので、その ID にもロールが必要です（開発用のボールトに付与するのが一般的）。
+    Key Vault のデータ アクセスには「アクセス キー」はありません。ユーザー割り当て ID が複数ある場合はクライアント ID を指定します。
+  refs:
+    - https://learn.microsoft.com/azure/developer/python/sdk/authentication/overview
+    - https://learn.microsoft.com/azure/key-vault/general/developers-guide
+
+- id: m-kv-object-types
+  objective: "4.1"
+  type: match
+  difficulty: 2
+  tags: [key-vault, keys, secrets, certificates]
+  question: |
+    保護したい情報と、Key Vault で使うオブジェクトの種類を対応付けてください。
+  pairs:
+    - left: "外部の LLM API の API キー（アプリが値そのものを読み取って使う）"
+      right: "シークレット"
+    - left: "署名や暗号化に使い、秘密部分をボールトの外に出さずに操作したい RSA 鍵"
+      right: "キー"
+    - left: "期限の前に自動で更新したい TLS の証明書（秘密キーを含む）"
+      right: "証明書"
+  distractors:
+    - "マネージド ID"
+  explanation: |
+    **シークレット**は任意の値（API キー、パスワード、接続文字列）を保存し、アプリが値を取り出して使います。**キー**は暗号鍵で、署名・暗号化などの操作を Key Vault の中で行い、秘密部分を取り出させない（HSM で保護できる）のが特徴です。**証明書**は X.509 証明書のライフサイクル（発行・更新・期限通知）を管理し、内部的にキーとシークレットも作られます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/about-keys-secrets-certificates
+
+# ---------- 4.2 ----------
+- id: m-appcfg-time-window
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, feature-flags, time-window]
+  question: |
+    年末のキャンペーン期間（12 月 20 日 0:00 から 12 月 26 日 0:00 まで）だけ、チャット画面に特別なプロンプト テンプレートを使わせたいと考えています。担当者が期間の開始と終了に手作業で切り替えなくて済む方法として、最も適切なものはどれですか。
+  options:
+    - "機能フラグに時間枠フィルター（Microsoft.TimeWindow）を設定し、開始と終了の日時を指定する"
+    - "ターゲット フィルターで 100% のユーザーを指定する"
+    - "キャンペーン用のラベルを付けたキーを作り、期間中だけアプリを再デプロイする"
+    - "Key Vault のシークレットの有効期限を使う"
+  answer: A
+  explanation: |
+    機能フラグの**時間枠フィルター**は、指定した開始・終了の日時の間だけフラグを有効にします（繰り返しの指定もできます）。ターゲット フィルターは「誰に」公開するかを決めるもので、「いつ」は指定できません。両方を組み合わせることもできます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-timewindow-filter
+
+- id: m-appcfg-python-selects
+  objective: "4.2"
+  type: dropdown
+  difficulty: 3
+  tags: [app-configuration, python, provider]
+  question: |
+    App Configuration から、キーが `RagApi:` で始まる値のうち、ラベル `prod` のものだけを読み込み、コードでは `config["Search:TopK"]` のようにプレフィックスなしで使いたいです。Python のプロバイダーのコードを完成させてください。
+  language: python
+  template: |
+    from azure.appconfiguration.provider import load, SettingSelector
+    from azure.identity import DefaultAzureCredential
+
+    config = load(
+        endpoint="https://appcs-rag.azconfig.io",
+        credential=DefaultAzureCredential(),
+        selects=[SettingSelector({{1}}="RagApi:*", {{2}}="prod")],
+        {{3}}=["RagApi:"],
+    )
+  blanks:
+    "1":
+      options: ["key_filter", "key", "prefix", "keys"]
+      answer: "key_filter"
+    "2":
+      options: ["label_filter", "label", "environment", "tag_filter"]
+      answer: "label_filter"
+    "3":
+      options: ["trim_prefixes", "strip_prefix", "key_prefix", "remove_prefixes"]
+      answer: "trim_prefixes"
+  explanation: |
+    `SettingSelector` の `key_filter` でキー（末尾の `*` で前方一致）、`label_filter` でラベルを指定します。`trim_prefixes` で指定したプレフィックスは、読み込んだキーから取り除かれます。
+    `selects` に複数のセレクターを並べると、後のものが前のものを上書きするので、「ラベルなし → `prod`」の順に並べれば共通値と環境ごとの値を重ねられます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/reference-python-provider
+    - https://learn.microsoft.com/azure/azure-app-configuration/quickstart-python-provider
+
+- id: m-appcfg-disable-local-auth
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, entra-id, access-keys]
+  question: |
+    セキュリティ ポリシーにより、App Configuration のアクセス キー（ローカル認証）を無効にしました。その直後から、接続文字列で接続していたアプリが 401 で構成を読み込めなくなりました。アプリをどう修正しますか。
+  options:
+    - "エンドポイントと Entra ID の資格情報（マネージド ID）で接続するように変え、その ID に「App Configuration Data Reader」ロールを付与する"
+    - "アクセス キーを再生成して、新しい接続文字列を使う"
+    - "その ID に App Configuration の「Contributor」（共同作成者）ロールを付与する"
+    - "App Configuration の SKU を Standard に変更する"
+  answer: A
+  explanation: |
+    アクセス キー認証を無効にすると、既存のアクセス キーは削除され、キーによる要求はすべて失敗します（再度有効にしても新しいキーが生成されるだけで、古い接続文字列は使えません）。アプリはエンドポイント + `DefaultAzureCredential` などで接続し、読み取りには **App Configuration Data Reader**、書き込みには **Data Owner** のデータ プレーン ロールを付与します。Contributor は管理プレーンのロールで、Entra ID 認証での値の読み取りには使えません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-disable-access-key-authentication
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-enable-rbac
+
+- id: m-appcfg-revision-restore
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, revisions, rollback]
+  question: |
+    本番で、誰かが `RagApi:Search:TopK` を誤って `50` に変更し、応答が遅くなりました。変更前の値が何だったかわかりません。スナップショットは使っていません。前の値を確認して元に戻す方法として、最も適切なものはどれですか。
+  options:
+    - "App Configuration のキーと値の変更履歴（リビジョン履歴）から以前の値を確認し、その値に戻す（ポータルの比較・復元機能も使える）"
+    - "アプリを前のバージョンに再デプロイすれば、構成も前の値に戻る"
+    - "Key Vault の論理的な削除から復元する"
+    - "App Configuration は以前の値を保持しないため、アプリのログから推測するしかない"
+  answer: A
+  explanation: |
+    App Configuration はキーと値の**変更履歴（リビジョン）**を一定期間保持し、ある時点の値を確認したり、特定の時点の状態に戻したりできます（保持期間は Free / Developer 層で 7 日、Standard / Premium 層で 30 日）。CLI では `az appconfig revision list --key <キー>` で履歴を確認し、`az appconfig kv restore --datetime <時刻>` で戻せます。
+    構成はアプリのデプロイとは独立しているので、アプリを戻しても値は戻りません。リリースごとに構成を固定したいなら、スナップショットを使う運用にします。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-point-time-snapshot
+    - https://learn.microsoft.com/cli/azure/appconfig/kv#az-appconfig-kv-restore
+
+# ---------- 4.3 ----------
+- id: m-otel-flush-shortlived
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, batch-processor, jobs]
+  question: |
+    Container Apps のジョブとして動く埋め込みのバッチ（数十秒で終了）を OpenTelemetry で計装しましたが、Application Insights に最後の方のスパンがほとんど届きません。常駐する API では同じ設定で問題ありません。最も可能性の高い原因と対処はどれですか。
+  options:
+    - "スパンはバッチ プロセッサでまとめて非同期に送られるため、送信前にプロセスが終了している。終了前に TracerProvider の `force_flush()`（または `shutdown()`）を呼ぶ"
+    - "ジョブではスパンを作れないため、ログだけを使う"
+    - "サンプリング率が 0% になっている"
+    - "ジョブの実行には `service.name` が設定できない"
+  answer: A
+  explanation: |
+    エクスポーターは通常、**バッチ プロセッサ**でスパンをためて一定間隔または一定件数ごとに送ります。短時間で終了するプロセスでは、バッファーに残ったまま終了してしまいます。終了処理で `force_flush()` / `shutdown()` を呼んで送り切るようにします。
+    常駐する API では次の送信タイミングが来るので、この問題は表面化しにくいです。
+  refs:
+    - https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+
+- id: m-otel-span-status
+  objective: "4.3"
+  type: yesno
+  difficulty: 3
+  tags: [opentelemetry, span-status, semantic-conventions]
+  question: |
+    OpenTelemetry の HTTP のセマンティック規約に従う計装で、スパンの状態（Status）がどうなるかについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "API（SERVER スパン）がクライアントに 404 を返した場合、通常そのスパンはエラーにはならない。"
+      answer: true
+    - text: "API が外部の LLM を呼んで（CLIENT スパン）429 が返った場合、そのスパンはエラーになる。"
+      answer: true
+    - text: "API（SERVER スパン）が 500 を返した場合、そのスパンはエラーになる。"
+      answer: true
+    - text: "アプリの業務上の失敗（例: 回答に必要な文書が見つからない）は、自動計装が自動的にエラーにする。"
+      answer: false
+  explanation: |
+    HTTP の規約では、SERVER スパンは 5xx をエラーとし、4xx は「クライアント側の問題」なので通常エラーにしません。CLIENT スパンは 4xx も 5xx もエラーにします。
+    業務上の失敗は自動計装にはわからないので、必要なら手動で `span.set_status(Status(StatusCode.ERROR, ...))` や属性・イベントを記録します。
+  refs:
+    - https://opentelemetry.io/docs/specs/semconv/http/http-spans/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-genai-semconv
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, genai, semantic-conventions]
+  question: |
+    LLM の呼び出しを手動でスパンにしています。モデル名や入力・出力のトークン数を属性として記録するとき、チームごとに `model`、`llm_model`、`tokens_in` などの名前がばらばらで、ダッシュボードやツールで横断的に分析できません。最も適切な対応はどれですか。
+  options:
+    - "OpenTelemetry の生成 AI のセマンティック規約の属性名（`gen_ai.request.model`、`gen_ai.usage.input_tokens` など）に統一する"
+    - "属性をやめて、すべてをログのメッセージ文字列に埋め込む"
+    - "チームごとに別の Application Insights を使う"
+    - "属性名に日本語を使う"
+  answer: A
+  explanation: |
+    OpenTelemetry には生成 AI 向けの**セマンティック規約**があり、`gen_ai.operation.name`、`gen_ai.request.model`、`gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` などの属性名が定義されています。規約に合わせれば、チームをまたいだ集計や、規約に対応したツール・ダッシュボードでの可視化がしやすくなります。
+    文字列に埋め込むと集計しにくくなります。
+  refs:
+    - https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-span-links
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, span-links, batching]
+  question: |
+    ワーカーは Service Bus から 50 件のメッセージをまとめて受信し、1 回の呼び出しで 50 件の埋め込みをまとめて生成します。50 件はそれぞれ別のリクエスト（別のトレース）から送られています。このバッチ処理のスパンと、元の 50 のトレースの関係を記録する方法として最も適切なものはどれですか。
+  options:
+    - "バッチ処理のスパンに、各メッセージのトレース コンテキストへのリンク（span links）を付ける"
+    - "50 件のうち最初のメッセージのスパンを親にし、残りは無視する"
+    - "50 個の親スパンを設定する"
+    - "トレース ID をすべて同じ値に書き換える"
+  answer: A
+  explanation: |
+    スパンの親は 1 つしか持てないため、複数のトレースにまたがる処理（バッチ受信など）では**スパン リンク**で関連を記録します。リンクを使えば、バッチのスパンから各元トレースをたどれます。
+    最初のメッセージだけを親にすると、他の 49 件のトレースからはバッチ処理が見えなくなります。
+  refs:
+    - https://opentelemetry.io/docs/concepts/signals/traces/#span-links
+    - https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/
+
+# ---------- 4.4 ----------
+- id: m-kql-parse-json
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, parse-json, container-apps]
+  question: |
+    アプリは標準出力に `{"level":"error","docId":"a1","msg":"embedding failed"}` のような JSON ログを出しており、`ContainerAppConsoleLogs_CL` の `Log_s` 列に文字列として入っています。`level` が `error` の行を `docId` ごとに数えたい場合、正しいクエリはどれですか。
+  options:
+    - "`ContainerAppConsoleLogs_CL | extend d = parse_json(Log_s) | where tostring(d.level) == \"error\" | summarize count() by docId = tostring(d.docId)`"
+    - "`ContainerAppConsoleLogs_CL | where Log_s.level == \"error\" | summarize count() by Log_s.docId`"
+    - "`ContainerAppConsoleLogs_CL | where level == \"error\" | summarize count() by docId`"
+    - "`ContainerAppConsoleLogs_CL | parse_json(Log_s) | count by docId`"
+  answer: A
+  explanation: |
+    文字列の列に入った JSON は `parse_json()` で dynamic 型に変換してから、`d.level` のようにプロパティを参照します。dynamic の値を比較・集計のキーに使うときは `tostring()` などで型を確定させます。
+    文字列のままではプロパティを参照できず、`level` という列も存在しません。
+  refs:
+    - https://learn.microsoft.com/kusto/query/parse-json-function
+    - https://learn.microsoft.com/azure/container-apps/log-monitoring
+
+- id: m-kql-dependency-share
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, dependencies, operation-id]
+  question: |
+    RAG API の応答時間のうち、LLM の呼び出し（依存関係の `type` が `HTTP`、`target` が LLM のホスト）が占める割合を、リクエストごとに求めたいと考えています。`requests` と `dependencies` を結び付けるキーとして最も適切なものはどれですか。
+  options:
+    - "`operation_Id`（同じトレースに属するテレメトリで共通の ID）"
+    - "`timestamp`（同じ時刻のものを結び付ける）"
+    - "`cloud_RoleInstance`"
+    - "`resultCode`"
+  answer: A
+  explanation: |
+    同じトレースに属するリクエスト・依存関係・例外・トレース ログには、共通の `operation_Id`（トレース ID）が入ります。`dependencies` を `operation_Id` で集計（`summarize llm = sum(duration) by operation_Id`）し、`requests` と `operation_Id` で結合すれば、リクエストごとの LLM の割合を計算できます。
+    親子関係を厳密にたどるときは、子の `operation_ParentId` と親の `id` を使います。時刻やインスタンスでは、別のリクエストと混ざります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/data-model-complete
+    - https://learn.microsoft.com/azure/azure-monitor/app/distributed-trace-data
+
+- id: m-kql-incident-window
+  objective: "4.4"
+  type: dropdown
+  difficulty: 2
+  tags: [kql, time-range, incident]
+  question: |
+    昨日の障害（2026-10-30 13:00〜13:45 UTC）の間に発生した例外を、種類ごとに数えて多い順に表示するクエリを完成させてください。
+  language: kql
+  template: |
+    exceptions
+    | where timestamp {{1}} (datetime(2026-10-30 13:00) {{2}} datetime(2026-10-30 13:45))
+    | summarize n = count() by type
+    | {{3}} n desc
+  blanks:
+    "1":
+      options: ["between", "in", "has", ">"]
+      answer: "between"
+    "2":
+      options: ["..", ",", "to", "-"]
+      answer: ".."
+    "3":
+      options: ["order by", "top", "take", "project"]
+      answer: "order by"
+  explanation: |
+    期間の指定は `between (開始 .. 終了)` です（両端を含みます）。過去の特定の時間帯を調べるときは、`ago()` ではなく `datetime()` で絶対時刻を指定します。並べ替えは `order by`（`sort by` と同じ）です。
+  refs:
+    - https://learn.microsoft.com/kusto/query/between-operator
+    - https://learn.microsoft.com/kusto/query/order-operator
