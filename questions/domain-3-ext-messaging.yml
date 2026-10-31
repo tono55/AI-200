@@ -1,0 +1,505 @@
+# 分野 3 追加問題: Service Bus（3.1）と Event Grid（3.2）
+
+# ---------- 3.1 ----------
+- id: s-sb-fanout-topic
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, topic, queue]
+  question: |
+    「文書がアップロードされた」という通知を、埋め込み生成サービス・ウイルス スキャン サービス・監査サービスの 3 つが**それぞれ必ず 1 回ずつ**処理する必要があります。Service Bus でどう構成しますか。
+  options:
+    - "トピックを作り、3 つのサービスごとにサブスクリプションを作る"
+    - "1 つのキューを作り、3 つのサービスがそれぞれ受信する"
+    - "1 つのキューを作り、セッションを有効にする"
+    - "3 つのキューを作り、送信側がランダムに 1 つを選んで送る"
+  answer: A
+  explanation: |
+    キューの受信者は**競合コンシューマー**で、1 つのメッセージは 1 つの受信者にしか届きません。全員に届けるには、トピックとサービスごとのサブスクリプション（それぞれがメッセージのコピーを持つ仮想キュー）を使います。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-queues-topics-subscriptions
+
+- id: s-sb-lock-renewal
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, lock, peek-lock]
+  question: |
+    LLM による要約に 3 分かかるワーカーが、Service Bus キュー（ロック期間 1 分）から Peek-Lock で受信しています。処理後の `complete` が `MessageLockLost` で失敗し、同じメッセージが別のワーカーでも処理されてしまいます。最も適切な対処はどれですか。
+  options:
+    - "処理中にロックを自動更新する（Python の `AutoLockRenewer`、`ServiceBusProcessor` の最大自動ロック更新時間など）。処理自体も冪等にする"
+    - "受信モードを ReceiveAndDelete にする"
+    - "キューの最大配信回数を 1 にする"
+    - "ロック期間を 30 分に設定する"
+  answer: A
+  explanation: |
+    ロックが切れると、メッセージは他の受信者に再配信されます。ロック期間の最大は 5 分なので、それより長い処理ではロックを更新します。ReceiveAndDelete は受信時に削除されるため、処理中に落ちるとメッセージを失います。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+
+- id: s-sb-receive-delete-risk
+  objective: "3.1"
+  type: yesno
+  difficulty: 2
+  tags: [service-bus, receive-mode]
+  question: |
+    Service Bus の受信モードについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "ReceiveAndDelete では、受信した時点でメッセージがキューから削除されるため、処理中にプロセスが落ちるとメッセージは失われる。"
+      answer: true
+    - text: "Peek-Lock では、`complete` するまでメッセージはキューに残り、ロックが切れると再び受信可能になる。"
+      answer: true
+    - text: "Peek-Lock と重複検出を使えば、受信側の処理は必ず 1 回だけになるので、冪等にする必要はない。"
+      answer: false
+  explanation: |
+    重複検出は**送信側**の重複（同じ MessageId の再送）を防ぐ機能です。受信側は少なくとも 1 回の配信（ロック切れや abandon で再配信）なので、処理は冪等にします。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+    - https://learn.microsoft.com/azure/service-bus-messaging/duplicate-detection
+
+- id: s-sb-sessions-order
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, sessions, ordering]
+  question: |
+    会話ごとのメッセージ（ユーザーの発言）を、**会話の中では送信順に**処理する必要があります。一方で、会話の数は多いので複数のワーカーで並列に処理したいです。最も適切な構成はどれですか。
+  options:
+    - "セッションを有効にしたキューを使い、送信時に `session_id` に会話 ID を設定する。ワーカーはセッション単位で受信する"
+    - "ワーカーを 1 台だけにする"
+    - "メッセージに番号を付け、ワーカー間でロックを取り合う"
+    - "トピックを作り、会話ごとにサブスクリプションを作る"
+  answer: A
+  explanation: |
+    **セッション**を使うと、同じセッション ID のメッセージは 1 つの受信者にロックされ、順序どおりに処理されます。異なるセッションは別のワーカーが並列に処理できます。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-sessions
+
+- id: s-sb-defer
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, deferral]
+  question: |
+    ワークフローで、「ステップ 2」のメッセージが「ステップ 1」より先に届くことがあります。ステップ 1 が終わるまでステップ 2 を保留し、後で確実に取り出したいです。Service Bus の機能として最も適切なものはどれですか。
+  options:
+    - "ステップ 2 のメッセージを `defer` し、そのシーケンス番号を保存しておき、ステップ 1 の完了後に `receive_deferred_messages` で取り出す"
+    - "ステップ 2 のメッセージを abandon して、順番が来るまで繰り返し受信する"
+    - "ステップ 2 のメッセージを配信不能キューに移す"
+    - "ステップ 2 のメッセージを削除して、送信側に再送させる"
+  answer: A
+  explanation: |
+    **遅延（defer）**されたメッセージはキューに残りますが、通常の受信では取得されず、シーケンス番号を指定して取り出します。abandon を繰り返すと配信回数が増えて最終的に DLQ に入ります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-deferral
+
+- id: s-sb-claim-check
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, message-size]
+  question: |
+    埋め込み生成のジョブ メッセージに、PDF から抽出した本文（最大 20 MB）を入れて Standard 層のキューに送ろうとすると失敗します。コストを抑えつつ確実に処理する方法として最も適切なものはどれですか。
+  options:
+    - "本文を Blob Storage に保存し、メッセージにはその場所（URL や ID）だけを入れる（Claim Check パターン）"
+    - "メッセージを 256 KB ごとに分割して順番に送る"
+    - "Basic 層に変える"
+    - "Event Grid に送る"
+  answer: A
+  explanation: |
+    Standard のメッセージ サイズの上限は 256 KB です。大きなデータはストレージに置き、メッセージには参照だけを入れる **Claim Check パターン**が一般的です（Premium なら最大 100 MB ですが、大きなメッセージはスループットにも影響します）。
+  refs:
+    - https://learn.microsoft.com/azure/architecture/patterns/claim-check
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-quotas
+
+- id: s-sb-correlation-filter
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, filter]
+  question: |
+    トピックに流れるメッセージを、`subject`（ラベル）が `embedding` のものだけ埋め込みサービスのサブスクリプションに届けたいです。大量のメッセージを処理するため、フィルターの評価コストを最小にしたいと考えています。最も適切なフィルターはどれですか。
+  options:
+    - "相関フィルター（`subject = embedding` の完全一致）"
+    - "SQL フィルター `subject LIKE '%embed%'`"
+    - "フィルターを付けず、受信側で不要なメッセージを捨てる"
+    - "ブール フィルター `TrueFilter`"
+  answer: A
+  explanation: |
+    完全一致で判定できるなら、**相関フィルター**が SQL フィルターより効率的です。SQL フィルターは柔軟（範囲、LIKE など）ですが、評価のコストが高くなります。受信側で捨てるとサブスクリプションに不要なメッセージがたまります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/topic-filters
+
+- id: s-sb-dlq-reprocess
+  objective: "3.1"
+  type: order
+  difficulty: 3
+  tags: [service-bus, dead-letter]
+  question: |
+    バグ修正後に、配信不能キュー（DLQ）にたまったメッセージを再処理します。安全な手順を順に並べてください。
+  items:
+    - "DLQ のメッセージを Peek-Lock で受信し、`dead_letter_reason` / `dead_letter_error_description` で原因を確認する"
+    - "必要なら本文を修正した新しいメッセージを作り、元のキューに送信する"
+    - "送信が成功したら、DLQ のメッセージを complete して削除する"
+    - "メトリック（DeadletteredMessages）で DLQ が空になったことを確認する"
+  distractors:
+    - "DLQ のメッセージに TTL を設定して自然に消えるのを待つ"
+  explanation: |
+    DLQ のメッセージは自動では消えず、TTL も適用されません。元のキューへ再送してから DLQ 側を complete する順にすると、途中で失敗してもメッセージを失いません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues
+
+- id: s-sb-premium-network
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, premium, network]
+  question: |
+    セキュリティ要件で、Service Bus にはプライベート エンドポイント経由でのみアクセスさせ、他のテナントとリソースを共有しないことが求められました。どの層を選びますか。
+  options:
+    - "Premium（専用のメッセージング ユニット、プライベート エンドポイント対応）"
+    - "Standard"
+    - "Basic"
+    - "どの層でも同じ"
+  answer: A
+  explanation: |
+    Premium は専用リソース（メッセージング ユニット）で動作し、プライベート エンドポイントなどのネットワーク分離に対応します。Basic / Standard は共有のマルチテナント環境です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-premium-messaging
+
+- id: s-sb-ttl-no-dlq
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, ttl, dead-letter]
+  question: |
+    キューのメッセージの TTL は 1 時間で、「メッセージの有効期限切れ時の配信不能」は無効のままです。ワーカーが 3 時間停止していた間に送られたメッセージはどうなりましたか。
+  options:
+    - "期限切れになった時点で破棄され、DLQ にも残っていない"
+    - "DLQ に `TTLExpiredException` として移されている"
+    - "TTL は無視され、キューに残っている"
+    - "送信者に自動で返送されている"
+  answer: A
+  explanation: |
+    期限切れのメッセージが DLQ に移るのは、キューやサブスクリプションで「有効期限切れ時の配信不能」を有効にしている場合だけです。無効なら破棄されます。失いたくないメッセージは、TTL の設定と配信不能の設定を見直します。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues
+
+- id: s-sb-receive-code
+  objective: "3.1"
+  type: dropdown
+  difficulty: 3
+  tags: [service-bus, python]
+  question: |
+    処理に最大 10 分かかるワーカーです。メッセージを失わず、処理中にロックが切れないようにするコードを完成させてください（Python）。
+  language: python
+  template: |
+    from azure.servicebus import ServiceBusClient, ServiceBusReceiveMode, AutoLockRenewer
+
+    renewer = {{1}}(max_lock_renewal_duration=900)
+    with client.get_queue_receiver(
+            "summaries",
+            receive_mode=ServiceBusReceiveMode.{{2}},
+            auto_lock_renewer=renewer) as receiver:
+        for msg in receiver:
+            summarize(msg)
+            receiver.{{3}}(msg)
+  blanks:
+    "1": {options: [AutoLockRenewer, ServiceBusSender, ServiceBusMessage], answer: AutoLockRenewer}
+    "2": {options: [PEEK_LOCK, RECEIVE_AND_DELETE], answer: PEEK_LOCK}
+    "3": {options: [complete_message, abandon_message, defer_message], answer: complete_message}
+  explanation: |
+    Peek-Lock で受信し、`AutoLockRenewer` で処理中にロックを自動更新して、処理が終わったら `complete_message` します。ReceiveAndDelete では処理中に落ちるとメッセージを失います。
+  refs:
+    - https://learn.microsoft.com/python/api/overview/azure/servicebus-readme
+
+- id: s-sb-scheduled
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, scheduled]
+  question: |
+    ユーザーが予約した「明日 9:00 にレポートを生成する」ジョブを Service Bus で実装します。予約がキャンセルされたら、そのジョブを取り消せるようにしたいです。最も適切な方法はどれですか。
+  options:
+    - "`schedule_messages` で配信予定時刻付きのメッセージを送り、返されたシーケンス番号を保存して、キャンセル時に `cancel_scheduled_messages` で取り消す"
+    - "メッセージを今すぐ送り、受信側で 9:00 まで待つ"
+    - "メッセージの TTL を 9:00 までに設定する"
+    - "9:00 に Timer トリガーで全ユーザー分を送る"
+  answer: A
+  explanation: |
+    スケジュールされたメッセージは指定時刻まで受信できず、シーケンス番号で取り消せます。受信側で待つとロックや配信回数の問題が起き、TTL は期限切れの設定なので逆の意味になります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-sequencing
+
+- id: s-sb-idempotent-receiver
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, idempotency]
+  question: |
+    ワーカーは Service Bus のメッセージを受けて、課金テーブルに 1 行追加します。まれにロック切れで同じメッセージが 2 回処理され、二重課金が発生しました。最も根本的な対策はどれですか。
+  options:
+    - "メッセージの `message_id`（業務上の一意キー）を課金テーブルの一意制約にし、同じ ID の処理を 1 回分しか反映しない（冪等な処理）"
+    - "重複検出を有効にする"
+    - "ロック期間を 0 にする"
+    - "最大配信回数を 1 にする"
+  answer: A
+  explanation: |
+    Service Bus の配信は**少なくとも 1 回**です。重複検出は送信時の重複を防ぐだけで、受信側の再配信は防げません。受信側の処理を冪等にするのが根本対策です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/duplicate-detection
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+
+# ---------- 3.2 ----------
+- id: s-eg-service-choice
+  objective: "3.2"
+  type: match
+  difficulty: 2
+  tags: [event-grid, service-bus, event-hubs]
+  question: |
+    要件に最も適したサービスを対応付けてください。
+  pairs:
+    - left: "Blob に文書がアップロードされたことを、複数のハンドラーにほぼリアルタイムでプッシュ通知したい"
+      right: "Event Grid"
+    - left: "推論ジョブを確実に順番どおり処理し、失敗したものは隔離したい"
+      right: "Service Bus"
+    - left: "数百万台の端末から毎秒大量のテレメトリを取り込み、後から再生して分析したい"
+      right: "Event Hubs"
+  distractors:
+    - "Queue Storage"
+  explanation: |
+    Event Grid は「起きたこと」を軽量に配る**イベント ルーティング**、Service Bus は確実な処理のための**メッセージ ブローカー**、Event Hubs は大量の**イベント ストリーム**の取り込みに向いています（Event Hubs は AI-200 の範囲外ですが、比較で問われることがあります）。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/compare-messaging-services
+
+- id: s-eg-webhook-validation
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, webhook, validation]
+  question: |
+    自作の Web API（Event Grid スキーマ）をハンドラーにしてイベント サブスクリプションを作成しようとすると、「エンドポイントの検証に失敗した」というエラーになります。API の実装で必要なものはどれですか。
+  options:
+    - "`Microsoft.EventGrid.SubscriptionValidationEvent` を受け取ったら、`data.validationCode` を `{\"validationResponse\": \"<code>\"}` として 200 で返す（または `validationUrl` に GET する）"
+    - "すべてのリクエストに 400 を返す"
+    - "API に API キー認証を追加する"
+    - "API を HTTP（非 TLS）で公開する"
+  answer: A
+  explanation: |
+    Event Grid は Webhook のエンドポイントがイベントを受け取る意思があることを確認するため、検証イベントを送ります。Event Grid スキーマでは `validationCode` を返すか `validationUrl` にアクセスします。CloudEvents スキーマでは HTTP OPTIONS によるハンドシェイクを使います。Azure Functions の Event Grid トリガーは自動で対応します。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/end-point-validation-event-grid-events-schema
+    - https://learn.microsoft.com/azure/event-grid/end-point-validation-cloud-events-schema
+
+- id: s-eg-slow-handler
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, retry, design]
+  question: |
+    Event Grid の Webhook ハンドラーが、受け取ったイベントの処理（埋め込み生成）を同期で行っており、45 秒かかってから 200 を返します。同じイベントが何度も届き、処理が重複しています。最も適切な設計はどれですか。
+  options:
+    - "ハンドラーはイベントを受け取ったらすぐにキュー（Service Bus など）に入れて 200 を返し、重い処理はワーカーで非同期に行う。イベントの `id` で重複を除外する"
+    - "Event Grid の最大配信試行回数を 1 にする"
+    - "ハンドラーの処理時間を延ばすために、200 を返す前に待機する"
+    - "配信不能を無効にする"
+  answer: A
+  explanation: |
+    Event Grid は配信後 **30 秒**以内に応答がないと失敗とみなして再試行します。ハンドラーは素早く受け付けて応答し、重い処理は非同期にします。Event Grid は少なくとも 1 回の配信なので、イベント ID による冪等化も必要です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: s-eg-to-servicebus
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, service-bus, buffering]
+  question: |
+    Blob の作成イベントをもとに埋め込みを生成しますが、ワーカーは時々メンテナンスで数時間止まります。イベントを失わず、ワーカーが自分のペースで処理できるようにしたいです。最も適切な構成はどれですか。
+  options:
+    - "Event Grid のイベント ハンドラーに Service Bus キューを指定し、ワーカーはキューから受信する"
+    - "Event Grid から直接ワーカーの Webhook に送り、最大配信試行回数を 30 にする"
+    - "ワーカーが Blob の一覧を 1 分ごとにポーリングする"
+    - "Event Grid の TTL を 1 分にする"
+  answer: A
+  explanation: |
+    Event Grid はプッシュ型で、ハンドラーが長時間止まると再試行の期限（既定 24 時間）を超えて失われる可能性があります。ハンドラーに **Service Bus キュー**を指定すれば、イベントはキューに保存され、ワーカーは再開後に処理できます（ロック、DLQ も使える）。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/handler-service-bus
+
+- id: s-eg-ttl-attempts-calc
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, retry]
+  question: |
+    イベント サブスクリプションの再試行ポリシーを「最大配信試行回数 10、イベントの TTL 30 分」に設定し、配信不能を有効にしました。ハンドラーがずっと 503 を返す場合、Event Grid はいつ配信をやめて配信不能にしますか。
+  options:
+    - "約 30 分後（TTL が先に切れる。指数バックオフのため 30 分までの試行は 10 回に届かない）"
+    - "10 回試行した時点（約 3 分後）"
+    - "24 時間後"
+    - "配信不能にはならず、永久に再試行する"
+  answer: A
+  explanation: |
+    再試行は 10 秒、30 秒、1 分、5 分、10 分、30 分…と間隔が広がるため、30 分以内の試行は 6 回程度です。最大試行回数と TTL は**先に達した方**で打ち切られるので、この設定では TTL の 30 分で配信不能になります。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: s-eg-subject-blob
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, filter, blob]
+  question: |
+    ストレージ アカウントのシステム トピックで、コンテナー `manuals` に置かれた `.pdf` ファイルの作成イベントだけをハンドラーに届けたいです。件名フィルターの設定として正しいものはどれですか。
+  options:
+    - "`subjectBeginsWith: /blobServices/default/containers/manuals/` と `subjectEndsWith: .pdf`"
+    - "`subjectBeginsWith: manuals` と `subjectEndsWith: pdf`"
+    - "`subjectBeginsWith: https://<account>.blob.core.windows.net/manuals`"
+    - "件名ではフィルターできないので、ハンドラーで判定する"
+  answer: A
+  explanation: |
+    Blob Storage のイベントの件名は `/blobServices/default/containers/<コンテナー名>/blobs/<パス>` の形式です。件名のプレフィックスとサフィックスでフィルターし、イベントの種類（`Microsoft.Storage.BlobCreated`）と組み合わせます。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-schema-blob-storage
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+
+- id: s-eg-pull-delivery
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, namespace, pull]
+  question: |
+    オンプレミスのバッチ システムが、Azure で発生したカスタム イベントを処理したいと考えています。オンプレミスには受信用の公開エンドポイントを用意できません。Event Grid で最も適切な方式はどれですか。
+  options:
+    - "Event Grid 名前空間のトピックとプル配信のイベント サブスクリプションを使い、オンプレミスから受信（受信 → 確認応答）する"
+    - "オンプレミスに Webhook を公開する"
+    - "Event Grid のシステム トピックを使う"
+    - "配信不能の保存先からイベントを読む"
+  answer: A
+  explanation: |
+    Event Grid 名前空間は**プル配信**をサポートし、消費者が自分のタイミングでイベントを受信して確認応答（acknowledge）します。受信側に公開エンドポイントが不要です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/pull-delivery-overview
+
+- id: s-eg-domains
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, domains, multi-tenant]
+  question: |
+    SaaS で、1,000 社の顧客ごとに「その顧客のイベントだけ」を顧客自身の Webhook に配信したいです。発行側のアプリは 1 つのエンドポイントに送りたく、顧客ごとのアクセス制御も必要です。最も適切な Event Grid の機能はどれですか。
+  options:
+    - "イベント ドメイン（顧客ごとのドメイン トピックに発行し、顧客ごとにサブスクリプションと権限を管理する）"
+    - "顧客ごとに 1,000 個のストレージ アカウントを作る"
+    - "1 つのカスタム トピックに全顧客のサブスクリプションを作り、フィルターなしで配信する"
+    - "Service Bus の 1 つのキューに全顧客のイベントを入れる"
+  answer: A
+  explanation: |
+    **イベント ドメイン**は多数の関連するトピックをまとめて管理する機能で、発行は 1 つのエンドポイントに行い、ドメイン トピックごとに購読と認可を分けられます。マルチテナントのイベント配信に向いています。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-domains
+
+- id: s-eg-batching-facts
+  objective: "3.2"
+  type: yesno
+  difficulty: 3
+  tags: [event-grid, batching]
+  question: |
+    イベント サブスクリプションでバッチ配信（最大イベント数 100）を有効にしました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "ハンドラーは 1 回の HTTP 要求で、最大 100 件のイベントの配列を受け取ることがある。"
+      answer: true
+    - text: "ハンドラーが 100 件中 1 件だけ処理に失敗してエラーを返すと、失敗した 1 件だけが再送される。"
+      answer: false
+    - text: "イベントが少ないときは、100 件たまるまで配信を待つ。"
+      answer: false
+  explanation: |
+    バッチ配信は**全部成功か全部失敗**で、部分的な成功はありません。また、件数がそろうのを待たずに、その時点にあるイベントで配信します（設定値は上限）。30 秒以内に処理できる量にします。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: s-eg-idempotency
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, idempotency]
+  question: |
+    Event Grid の通知をもとに、文書ごとに 1 回だけ埋め込みを生成したいです。同じイベントがまれに 2 回届くことがあります。重複を判定するのに最も適したキーはどれですか。
+  options:
+    - "イベントの `id`（発行元が付ける一意の ID）"
+    - "イベントの `eventTime`"
+    - "イベントの `eventType`"
+    - "ハンドラーが受け取った時刻"
+  answer: A
+  explanation: |
+    Event Grid は少なくとも 1 回の配信で、再試行時には同じ `id` のイベントが届きます。処理済みの `id` を記録して重複をスキップします。CloudEvents では `source` と `id` の組が一意です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+    - https://learn.microsoft.com/azure/event-grid/cloud-event-schema
+
+- id: s-eg-delivery-schema
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, cloudevents, schema]
+  question: |
+    既存のカスタム トピックは Event Grid スキーマでイベントを受け付けています。新しく作るハンドラーは CloudEvents 1.0 の形式しか解釈できません。発行側を変えずに対応する方法はどれですか。
+  options:
+    - "新しいイベント サブスクリプションの配信スキーマ（`--event-delivery-schema`）を CloudEvents 1.0 にする"
+    - "トピックを削除して作り直す以外に方法はない"
+    - "ハンドラーで Event Grid スキーマを解釈できるまで待つ"
+    - "Service Bus に転送すれば自動で変換される"
+  answer: A
+  explanation: |
+    Event Grid スキーマで受け付けたイベントは、サブスクリプションごとに CloudEvents スキーマで配信するよう指定できます（入力スキーマと配信スキーマは別に設定できる）。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/cloud-event-schema
+    - https://learn.microsoft.com/azure/event-grid/input-mappings
+
+- id: s-eg-publish-code
+  objective: "3.2"
+  type: dropdown
+  difficulty: 2
+  tags: [event-grid, python, cloudevents]
+  question: |
+    Python で、マネージド ID を使ってカスタム トピックに CloudEvent を発行するコードを完成させてください。
+  language: python
+  template: |
+    from azure.identity import DefaultAzureCredential
+    from azure.eventgrid import {{1}}
+    from azure.core.messaging import CloudEvent
+
+    client = {{1}}(topic_endpoint, {{2}}())
+    client.send({{3}}(
+        source="/apps/rag-ingest",
+        type="Contoso.Documents.Indexed",
+        data={"docId": 42},
+    ))
+  blanks:
+    "1": {options: [EventGridPublisherClient, EventGridConsumerClient, ServiceBusClient], answer: EventGridPublisherClient}
+    "2": {options: [DefaultAzureCredential, AzureKeyCredential, AzureSasCredential], answer: DefaultAzureCredential}
+    "3": {options: [CloudEvent, EventGridEvent, ServiceBusMessage], answer: CloudEvent}
+  explanation: |
+    `EventGridPublisherClient` に Entra ID の資格情報（`DefaultAzureCredential`）を渡すと、マネージド ID で発行できます。ID にはトピックの **EventGrid Data Sender** ロールが必要です。キーを使う場合は `AzureKeyCredential` です。
+  refs:
+    - https://learn.microsoft.com/python/api/overview/azure/eventgrid-readme
+
+- id: s-eg-deadletter-setup
+  objective: "3.2"
+  type: multiple
+  difficulty: 3
+  tags: [event-grid, dead-letter]
+  question: |
+    イベント サブスクリプションで配信不能を有効にします。必要なもの・正しい動作を **2 つ**選んでください。
+  options:
+    - "配信不能の保存先として、ストレージ アカウントの Blob コンテナーを指定する"
+    - "最大試行回数または TTL に達したイベントや、400 / 413 などで配信が成功しないと判断したイベントが保存される"
+    - "配信不能になったイベントは、Event Grid が自動で元のハンドラーに再送する"
+    - "配信不能は既定で有効になっている"
+  answer: [A, B]
+  explanation: |
+    配信不能は既定で無効で、有効にするにはストレージ アカウントのコンテナーを指定します。保存されたイベントは自動では再送されないため、Blob から読み出して再処理する仕組みを用意します（保存先が 4 時間使えないとイベントは破棄されます）。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+    - https://learn.microsoft.com/azure/event-grid/manage-event-delivery
