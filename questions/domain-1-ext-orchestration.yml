@@ -1,0 +1,522 @@
+# 分野 1 追加問題: KEDA（1.5）、AKS マニフェスト（1.6）、監視とトラブルシューティング（1.7）
+
+# ---------- 1.5 ----------
+- id: c-keda-http-calc
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, http-scaling]
+  question: |
+    Container Apps の HTTP スケール ルールを `concurrentRequests: 50`、`minReplicas: 1`、`maxReplicas: 6` にしています。ピーク時に同時リクエストが平均 400 になりました。安定したときのレプリカ数として最も近いものはどれですか。
+  options:
+    - "1"
+    - "6"
+    - "8"
+    - "400"
+  answer: B
+  explanation: |
+    必要なレプリカ数はおおよそ「同時リクエスト数 ÷ しきい値」= 400 ÷ 50 = 8 ですが、`maxReplicas: 6` が上限なので **6** で頭打ちになります。
+    ピーク時に足りなければ `maxReplicas` を上げるか、1 レプリカが処理できる量（しきい値やリソース）を見直します。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-sb-calc
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, service-bus]
+  question: |
+    ワーカーの KEDA ルールは `type: azure-servicebus`、`messageCount: "5"`、`maxReplicas: 10` です。キューに 120 件のメッセージがたまっているとき、目標とされるレプリカ数はどれですか。
+  options:
+    - "5"
+    - "10"
+    - "24"
+    - "120"
+  answer: B
+  explanation: |
+    `messageCount` は**1 レプリカあたりの目標メッセージ数**です。120 ÷ 5 = 24 レプリカが目標ですが、`maxReplicas: 10` が上限なので 10 になります。
+    メッセージ処理が重いなら `messageCount` を小さく、軽いなら大きくして調整します。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://keda.sh/docs/latest/scalers/azure-service-bus/
+
+- id: c-keda-cold-start
+  objective: "1.5"
+  type: single
+  difficulty: 2
+  tags: [container-apps, keda, cold-start]
+  question: |
+    社内向けチャット API（Container Apps、HTTP スケール ルール、`minReplicas: 0`）で、朝一番のリクエストだけ 20 秒以上かかるという苦情があります。モデルの読み込みに時間がかかるためです。最もシンプルな対処はどれですか。
+  options:
+    - "`minReplicas` を 1 以上にして、常に 1 つはレプリカを起動しておく"
+    - "`concurrentRequests` を 1 にする"
+    - "`maxReplicas` を 1,000 にする"
+    - "クールダウン期間を 0 秒にする"
+  answer: A
+  explanation: |
+    `minReplicas: 0` ではアイドル時に 0 になり、最初のリクエストでレプリカの起動（コールド スタート）を待つことになります。常に応答させたいなら `minReplicas` を 1 以上にします（アイドル中のレプリカにもコストがかかる点とのトレードオフ）。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-storage-queue-yaml
+  objective: "1.5"
+  type: dropdown
+  difficulty: 2
+  tags: [container-apps, keda, storage-queue]
+  question: |
+    Azure Storage のキュー `jobs` のメッセージが 20 件ごとに 1 レプリカ増えるように、Container Apps のスケール ルールを完成させてください。接続文字列はシークレット `queue-conn` に入っています。
+  language: yaml
+  template: |
+    rules:
+      - name: storage-queue
+        custom:
+          type: {{1}}
+          metadata:
+            queueName: jobs
+            {{2}}: "20"
+            accountName: stjobs
+          auth:
+            - secretRef: {{3}}
+              triggerParameter: connection
+  blanks:
+    "1": {options: [azure-queue, azure-servicebus, azure-blob], answer: azure-queue}
+    "2": {options: [queueLength, messageCount, concurrentRequests], answer: queueLength}
+    "3": {options: [queue-conn, connection, jobs], answer: queue-conn}
+  explanation: |
+    Storage キューの KEDA スケーラーは `azure-queue` で、しきい値は `queueLength` です（Service Bus は `azure-servicebus` と `messageCount`）。
+    `auth` の `secretRef` には Container Apps のシークレット名、`triggerParameter` にはスケーラーが期待するパラメーター名（`connection`）を指定します。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://keda.sh/docs/latest/scalers/azure-storage-queue/
+
+- id: c-keda-cpu-rule
+  objective: "1.5"
+  type: single
+  difficulty: 2
+  tags: [container-apps, keda, cpu]
+  question: |
+    CPU を多く使う再ランク付けサービス（Container Apps）を、CPU 使用率 70% を目安にスケールさせたいと考えています。また、夜間はレプリカ 0 にしてコストを下げたいとも言われました。正しい説明はどれですか。
+  options:
+    - "CPU のカスタム ルール（`type: cpu`、使用率 70）でスケールできるが、CPU / メモリのルールだけでは 0 までスケール インできない。0 にするには HTTP やイベント ドリブンのルールと組み合わせる"
+    - "CPU ルールなら自動で 0 までスケール インされる"
+    - "Container Apps では CPU ベースのスケールはできない"
+    - "CPU ルールを使うには AKS が必要である"
+  answer: A
+  explanation: |
+    Container Apps は KEDA の CPU / メモリ スケーラーも使えますが、レプリカが 0 だと使用率を測れないため、これらのルールだけでは 0 まではスケール インしません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-cron
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, cron]
+  question: |
+    平日 9:00〜18:00（日本時間）は社内アクセスが集中するため、あらかじめ最低 5 レプリカを確保し、それ以外の時間は需要に応じて 0〜2 にしたいと考えています。Container Apps で最も適切な方法はどれですか。
+  options:
+    - "KEDA の cron スケーラー（timezone、start、end、desiredReplicas）のカスタム ルールを、HTTP ルールと組み合わせる"
+    - "Azure Automation で毎日アプリを削除・再作成する"
+    - "`minReplicas: 5` に固定する"
+    - "時間帯ごとに別の Container Apps 環境を用意する"
+  answer: A
+  explanation: |
+    Container Apps のカスタム ルールでは、ScaledObject ベースの任意の KEDA スケーラーを使えます。**cron スケーラー**は指定した時間帯に `desiredReplicas` を確保します。HTTP ルールと組み合わせると、時間外は需要に応じてスケールします。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://keda.sh/docs/latest/scalers/cron/
+
+- id: c-keda-job-event
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, jobs, keda]
+  question: |
+    イベント ドリブンの Container Apps ジョブで、Storage キューのメッセージ 1 件につき 1 回の実行（1 メッセージを処理して終了）を、同時に最大 10 実行まで行いたいと考えています。設定として最も適切なものはどれですか。
+  options:
+    - "`--trigger-type Event` とキューのスケール ルール（`queueLength: 1`）、`--min-executions 0 --max-executions 10`"
+    - "`--trigger-type Schedule` と `--cron-expression \"* * * * *\"`"
+    - "HTTP スケール ルールを使い、キューから HTTP に転送する"
+    - "`--trigger-type Manual` にして、毎回手動で開始する"
+  answer: A
+  explanation: |
+    イベント ドリブンのジョブは KEDA のスケール ルールでキューを監視し、条件に応じて**ジョブの実行**を開始します。最小 / 最大の実行数で同時実行を制御します。ジョブでは HTTP / TCP のスケール ルールは使えません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/jobs
+
+- id: c-keda-multi-rule
+  objective: "1.5"
+  type: yesno
+  difficulty: 3
+  tags: [container-apps, keda]
+  question: |
+    1 つのコンテナー アプリに HTTP ルール（`concurrentRequests: 20`）と Service Bus ルール（`messageCount: 10`）を設定しています。`minReplicas: 0`、`maxReplicas: 30` です。次の記述が正しいかを答えてください。
+  statements:
+    - text: "HTTP の負荷がなくても、キューにメッセージがたまっていればスケール アウトする。"
+      answer: true
+    - text: "両方のルールの条件を同時に満たしたときだけスケール アウトする。"
+      answer: false
+    - text: "どちらのルールでも、レプリカ数は 30 を超えない。"
+      answer: true
+    - text: "両方の負荷がなくなれば、最後の 1 レプリカはクールダウン期間の後に 0 になる。"
+      answer: true
+  explanation: |
+    複数のルールがある場合、**いずれかのルール**の条件で必要なレプリカ数が決まり、上限は `maxReplicas` です。負荷がなくなると、最後の 1 レプリカから 0 にするときにクールダウン（既定 300 秒）が適用されます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+# ---------- 1.6 ----------
+- id: c-aks-rolling-params
+  objective: "1.6"
+  type: yesno
+  difficulty: 3
+  tags: [aks, deployment, rolling-update]
+  question: |
+    `replicas: 4` の Deployment に `strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}` を設定し、イメージを更新しました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "更新中も、準備完了の Pod が 4 未満になることはない（readinessProbe が正しく設定されている場合）。"
+      answer: true
+    - text: "更新中は、一時的に最大 5 個の Pod が存在しうる。"
+      answer: true
+    - text: "新しい Pod が準備完了にならない場合でも、古い Pod は順次削除される。"
+      answer: false
+    - text: "`kubectl rollout undo deployment/<名前>` で 1 つ前のリビジョンに戻せる。"
+      answer: true
+  explanation: |
+    `maxUnavailable: 0` は「準備完了の Pod を必要数より減らさない」、`maxSurge: 1` は「必要数より 1 つ多く作ってよい」という意味です。新しい Pod が Ready にならなければ、古い Pod は削除されずロールアウトが止まります。
+  refs:
+    - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment
+
+- id: c-aks-configmap-update
+  objective: "1.6"
+  type: yesno
+  difficulty: 3
+  tags: [aks, configmap]
+  question: |
+    ConfigMap `api-config` の値を `kubectl apply` で更新しました。Pod は再起動していません。次の記述が正しいかを答えてください。
+  statements:
+    - text: "`envFrom` / `valueFrom.configMapKeyRef` で環境変数として渡している値は、実行中の Pod にすぐ反映される。"
+      answer: false
+    - text: "ボリュームとしてマウントしている ConfigMap（`subPath` なし）のファイルは、しばらくすると新しい値に更新される。"
+      answer: true
+    - text: "環境変数に反映させるには、Pod を再作成する（例: `kubectl rollout restart deployment/<名前>`）。"
+      answer: true
+  explanation: |
+    環境変数はコンテナーの起動時に設定されるため、ConfigMap を変えても実行中の Pod には反映されません。ボリュームとしてマウントしたファイルは kubelet によって一定時間後に更新されます（`subPath` でマウントした場合は更新されません）。
+  refs:
+    - https://kubernetes.io/docs/concepts/configuration/configmap/
+
+- id: c-aks-requests-limits
+  objective: "1.6"
+  type: match
+  difficulty: 2
+  tags: [aks, resources]
+  question: |
+    Pod の `resources` の設定と、その効果を対応付けてください。
+  pairs:
+    - left: "requests.memory / requests.cpu"
+      right: "スケジューラーがノードの空き容量を判断するときに使う（予約量）"
+    - left: "limits.memory を超えて使った"
+      right: "コンテナーが OOMKilled（終了コード 137）で強制終了される"
+    - left: "limits.cpu を超えて使おうとした"
+      right: "CPU がスロットリングされ、処理が遅くなる"
+  distractors:
+    - "Pod が自動で別のノードに移動する"
+  explanation: |
+    requests はスケジューリング（どのノードに置けるか）と HPA の使用率の基準に使われます。メモリの上限超過は強制終了、CPU の上限超過はスロットリングになります。
+  refs:
+    - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+
+- id: c-aks-hpa-unknown
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, hpa]
+  question: |
+    `kubectl autoscale deployment api --cpu-percent=70 --min=2 --max=10` を実行しましたが、`kubectl get hpa` の TARGETS が `<unknown>/70%` のままで、スケールしません。metrics-server は動いています。最も可能性の高い原因はどれですか。
+  options:
+    - "Deployment のコンテナーに `resources.requests.cpu` が設定されていない"
+    - "`maxReplicas` が小さすぎる"
+    - "Service の type が ClusterIP である"
+    - "イメージ タグが `latest` である"
+  answer: A
+  explanation: |
+    HPA の CPU 使用率は **requests に対する割合**で計算されるため、requests がないと使用率を計算できず `<unknown>` になります。
+  refs:
+    - https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
+    - https://learn.microsoft.com/azure/aks/concepts-scale
+
+- id: c-aks-keyvault-csi
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, key-vault, secrets]
+  question: |
+    AKS の Pod で、Key Vault のシークレットをファイルとして使いたいと考えています。Kubernetes の Secret にシークレットの値を手で登録する運用はやめたいです。最も適切な構成はどれですか。
+  options:
+    - "Secrets Store CSI Driver の Azure Key Vault プロバイダー（アドオン）を有効にし、`SecretProviderClass` を作成して CSI ボリュームとしてマウントする（認証はワークロード ID）"
+    - "ConfigMap にシークレットを base64 で保存する"
+    - "シークレットをコンテナー イメージに含める"
+    - "Pod の環境変数に Key Vault の URI を書けば、Kubernetes が自動で値に置き換える"
+  answer: A
+  explanation: |
+    **Secrets Store CSI Driver** は、`SecretProviderClass` で指定した Key Vault のシークレットを、Pod の起動時にボリュームとしてマウントします（必要なら Kubernetes Secret に同期も可能）。Key Vault へのアクセスにはワークロード ID などを使います。
+  refs:
+    - https://learn.microsoft.com/azure/aks/csi-secrets-store-driver
+
+- id: c-aks-workload-identity
+  objective: "1.6"
+  type: multiple
+  difficulty: 3
+  tags: [aks, workload-identity]
+  question: |
+    AKS の Pod から Microsoft Entra ワークロード ID で Cosmos DB にアクセスします（OIDC 発行者とワークロード ID はクラスターで有効化済み、ユーザー割り当てマネージド ID も作成済み）。マニフェスト側で必要なものを **2 つ**選んでください。
+  options:
+    - "ServiceAccount に注釈 `azure.workload.identity/client-id: <マネージド ID のクライアント ID>` を付け、Pod でその ServiceAccount を使う"
+    - "Pod（テンプレート）にラベル `azure.workload.identity/use: \"true\"` を付ける"
+    - "Pod の環境変数にマネージド ID のクライアント シークレットを設定する"
+    - "Service の type を LoadBalancer にする"
+  answer: [A, B]
+  explanation: |
+    ワークロード ID は、ServiceAccount のトークンをマネージド ID のフェデレーション資格情報と交換して Entra のトークンを得る仕組みです。Azure 側では、マネージド ID にフェデレーション資格情報（発行者 = クラスターの OIDC URL、サブジェクト = `system:serviceaccount:<名前空間>:<SA名>`）を作成します。シークレットは不要です。
+  refs:
+    - https://learn.microsoft.com/azure/aks/workload-identity-overview
+    - https://learn.microsoft.com/azure/aks/workload-identity-deploy-cluster
+
+- id: c-aks-internal-lb
+  objective: "1.6"
+  type: single
+  difficulty: 2
+  tags: [aks, service, load-balancer]
+  question: |
+    AKS の推論 API を、同じ VNet 内の他のシステムからだけ呼べるようにしたいと考えています。パブリック IP は付けたくありません。Service のマニフェストで何を指定しますか。
+  options:
+    - "`type: LoadBalancer` と注釈 `service.beta.kubernetes.io/azure-load-balancer-internal: \"true\"`"
+    - "`type: NodePort` とパブリック IP"
+    - "`type: ExternalName`"
+    - "`type: ClusterIP` だけで VNet 内の他システムから呼べる"
+  answer: A
+  explanation: |
+    注釈 `azure-load-balancer-internal: "true"` を付けると、AKS は VNet 内のプライベート IP を持つ**内部ロード バランサー**を作成します。ClusterIP はクラスター内からしか到達できません。
+  refs:
+    - https://learn.microsoft.com/azure/aks/internal-lb
+
+- id: c-aks-probe-yaml
+  objective: "1.6"
+  type: dropdown
+  difficulty: 3
+  tags: [aks, probes, yaml]
+  question: |
+    起動に最大 3 分かかる推論コンテナーです。起動完了までは再起動させず、起動後は `/healthz` が 3 回連続で失敗したら再起動、`/ready` が失敗している間はトラフィックを送らないようにします。マニフェストを完成させてください。
+  language: yaml
+  template: |
+    {{1}}:
+      httpGet: { path: /healthz, port: 8000 }
+      periodSeconds: 10
+      failureThreshold: 18   # 10 秒 × 18 回 = 最大 180 秒待つ
+    {{2}}:
+      httpGet: { path: /healthz, port: 8000 }
+      periodSeconds: 10
+      failureThreshold: 3
+    {{3}}:
+      httpGet: { path: /ready, port: 8000 }
+      periodSeconds: 5
+  blanks:
+    "1": {options: [startupProbe, livenessProbe, readinessProbe], answer: startupProbe}
+    "2": {options: [livenessProbe, startupProbe, readinessProbe], answer: livenessProbe}
+    "3": {options: [readinessProbe, livenessProbe, startupProbe], answer: readinessProbe}
+  explanation: |
+    startupProbe は成功するまで他のプローブを止め、`failureThreshold × periodSeconds` の間待ちます。起動後は livenessProbe の失敗で再起動、readinessProbe の失敗で Service のエンドポイントから外れます。
+  refs:
+    - https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+
+- id: c-aks-app-routing
+  objective: "1.6"
+  type: single
+  difficulty: 2
+  tags: [aks, ingress]
+  question: |
+    AKS で複数の Service（`/api` と `/chat`）を 1 つのパブリック エンドポイントから HTTP のパスで振り分けたいと考えています。運用の手間を減らすため、マネージドのイングレス コントローラーを使いたいです。最も適切なものはどれですか。
+  options:
+    - "アプリケーション ルーティング アドオン（マネージド NGINX）を有効にし、`ingressClassName: webapprouting.kubernetes.azure.com` の Ingress を作る"
+    - "Service ごとに type LoadBalancer を作り、DNS で振り分ける"
+    - "ConfigMap にルーティング ルールを書く"
+    - "ClusterIP の Service を 1 つにまとめる"
+  answer: A
+  explanation: |
+    アプリケーション ルーティング アドオンは、AKS が管理する NGINX イングレス コントローラーを提供します。Ingress リソースでホスト名やパスごとに Service へ振り分けられます。
+  refs:
+    - https://learn.microsoft.com/azure/aks/app-routing
+
+- id: c-aks-namespace-dns
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, service, dns]
+  question: |
+    名前空間 `frontend` の Pod から、名前空間 `backend` の Service `rag-api`（ClusterIP、ポート 80）を呼び出します。`curl http://rag-api` は名前解決に失敗します。正しい呼び出し方はどれですか。
+  options:
+    - "`http://rag-api.backend`（または `http://rag-api.backend.svc.cluster.local`）"
+    - "`http://backend/rag-api`"
+    - "Service を LoadBalancer に変える以外に方法はない"
+    - "Pod の IP アドレスを直接指定する"
+  answer: A
+  explanation: |
+    Service の短い名前（`rag-api`）は同じ名前空間内でしか解決されません。別の名前空間からは `<Service名>.<名前空間>` または FQDN の `<Service名>.<名前空間>.svc.cluster.local` を使います。
+  refs:
+    - https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/
+
+# ---------- 1.7 ----------
+- id: c-trouble-insufficient-memory
+  objective: "1.7"
+  type: single
+  difficulty: 2
+  tags: [aks, troubleshooting, scheduling]
+  question: |
+    新しい推論 Pod が `Pending` のままです。`kubectl describe pod` の Events に `0/3 nodes are available: 3 Insufficient memory.` と表示されています。最も適切な対処はどれですか。
+  options:
+    - "Pod の `resources.requests.memory` が過大でないか見直すか、ノードを追加・大きなノード プールを用意する（クラスター オートスケーラーなど）"
+    - "`livenessProbe` を削除する"
+    - "Service の selector を修正する"
+    - "`kubectl logs --previous` でアプリのエラーを確認する"
+  answer: A
+  explanation: |
+    スケジューラーは各ノードの空き容量と Pod の **requests** を比べて配置先を決めます。どのノードにも収まらないと Pending になります。コンテナーはまだ起動していないので、アプリのログは出ません。
+  refs:
+    - https://learn.microsoft.com/azure/aks/events
+    - https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/
+
+- id: c-trouble-config-error
+  objective: "1.7"
+  type: single
+  difficulty: 2
+  tags: [aks, troubleshooting, secrets]
+  question: |
+    Pod の状態が `CreateContainerConfigError` で、Events に `Error: secret "db-credentials" not found` と表示されています。アプリのコードは変更していません。原因と対処はどれですか。
+  options:
+    - "Pod が参照する Secret が（その名前空間に）存在しない。Secret を作成するか、参照名・名前空間を修正する"
+    - "イメージのタグが存在しない。イメージを再プッシュする"
+    - "メモリの limits が小さい。limits を増やす"
+    - "readinessProbe が失敗している。プローブを削除する"
+  answer: A
+  explanation: |
+    `CreateContainerConfigError` は、コンテナーの作成に必要な構成（参照する Secret / ConfigMap やそのキー）が見つからないときに起きます。Secret は名前空間ごとのリソースなので、別の名前空間にあっても参照できません。
+  refs:
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/pod-stuck-crashloopbackoff-mode
+
+- id: c-trouble-kql-containerlog
+  objective: "1.7"
+  type: dropdown
+  difficulty: 3
+  tags: [aks, container-insights, kql]
+  question: |
+    Container Insights を有効にした AKS で、直近 1 時間に名前空間 `rag` の Pod が出力したエラー ログを新しい順に表示する KQL を完成させてください。
+  language: kusto
+  template: |
+    {{1}}
+    | where TimeGenerated > ago(1h)
+    | where PodNamespace == "rag"
+    | where LogMessage {{2}} "error"
+    | project TimeGenerated, PodName, ContainerName, LogMessage
+    | {{3}} TimeGenerated desc
+  blanks:
+    "1": {options: [ContainerLogV2, AppRequests, KubeNodeInventory], answer: ContainerLogV2}
+    "2": {options: [has, ==, startswith], answer: has}
+    "3": {options: [order by, summarize by, extend], answer: order by}
+  explanation: |
+    Container Insights のコンテナーの標準出力 / 標準エラーは `ContainerLogV2` に入り、`PodNamespace`、`PodName`、`ContainerName`、`LogMessage` などの列があります。`has` は単語単位の高速な一致です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/containers/container-insights-logs-schema
+
+- id: c-trouble-aca-unauthorized
+  objective: "1.7"
+  type: single
+  difficulty: 2
+  tags: [container-apps, troubleshooting, acr]
+  question: |
+    Container Apps の新しいリビジョンが `Failed` になりました。`az containerapp logs show --type system` に、イメージのプルが `unauthorized: authentication required` で失敗したと出ています。アプリは `--registry-identity system` を使っています。最も可能性の高い原因はどれですか。
+  options:
+    - "アプリのシステム割り当て ID に、ACR の AcrPull ロールが付与されていない（または反映待ち）"
+    - "アプリの待ち受けポートが違う"
+    - "スケール ルールの `messageCount` が大きすぎる"
+    - "Log Analytics ワークスペースが削除された"
+  answer: A
+  explanation: |
+    `unauthorized` はレジストリの認証・認可の失敗です。マネージド ID でプルする場合、その ID に AcrPull が必要です。ロールの割り当ては反映まで数分かかることがあります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/troubleshoot-deployment-errors
+    - https://learn.microsoft.com/azure/container-apps/managed-identity-image-pull
+
+- id: c-trouble-aca-exec-connectivity
+  objective: "1.7"
+  type: single
+  difficulty: 2
+  tags: [container-apps, troubleshooting, network]
+  question: |
+    Container Apps のアプリから PostgreSQL（プライベート エンドポイント）への接続がタイムアウトします。アプリのコードではなくネットワーク経路の問題か切り分けるため、**コンテナーの中から**名前解決と接続を確かめたいと考えています。どのコマンドを使いますか。
+  options:
+    - "`az containerapp exec -n <アプリ> -g <RG> --command sh` で入り、`nslookup` や接続テストを行う"
+    - "`kubectl exec` を実行する"
+    - "`az acr run` を実行する"
+    - "`az webapp log tail` を実行する"
+  answer: A
+  explanation: |
+    `az containerapp exec` で実行中のレプリカのコンテナーに入れます。プライベート エンドポイントの名前がプライベート IP に解決されるか（プライベート DNS ゾーンのリンク）、ポートに届くかを確認すると、DNS / ネットワーク / 認証のどこに問題があるか切り分けられます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/container-console
+
+- id: c-trouble-order
+  objective: "1.7"
+  type: order
+  difficulty: 2
+  tags: [aks, troubleshooting, kubectl]
+  question: |
+    AKS で新しいバージョンをデプロイしたら Pod が再起動を繰り返すようになりました。原因を調べて元に戻すまでの一般的な手順を順に並べてください。
+  items:
+    - "`kubectl get pods` で状態（CrashLoopBackOff など）と再起動回数を確認する"
+    - "`kubectl describe pod` で Events と前回の終了理由・終了コードを確認する"
+    - "`kubectl logs <pod> --previous` でクラッシュ直前のログを確認する"
+    - "原因がすぐ直せなければ `kubectl rollout undo deployment/<名前>` で前のバージョンに戻す"
+  distractors:
+    - "クラスターを削除して作り直す"
+  explanation: |
+    状態の把握 → Events と終了理由（OOMKilled か、アプリの異常終了か、プローブの失敗か）→ 前回のログ、の順に調べ、利用者への影響が続くならまずロールバックしてから原因を修正します。
+  refs:
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/pod-stuck-crashloopbackoff-mode
+
+- id: c-trouble-aca-probe
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [container-apps, probes, troubleshooting]
+  question: |
+    Container Apps のシステム ログに、新しいリビジョンの readiness プローブが失敗し続けていると出ています。アプリはモデルの読み込みに 90 秒かかり、その後は正常に応答します。プローブはタイムアウトが短い設定です。最も適切な対処はどれですか。
+  options:
+    - "startup プローブを追加する（または readiness の初期遅延・失敗しきい値を延ばす）"
+    - "イングレスを無効にする"
+    - "最大レプリカ数を増やす"
+    - "シークレットをすべて削除する"
+  answer: A
+  explanation: |
+    Container Apps も liveness / readiness / startup の 3 種類のプローブをサポートします。起動が遅いアプリでは startup プローブで起動完了まで待つか、readiness の `initialDelaySeconds` や `failureThreshold` を調整します。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/health-probes
+
+- id: c-trouble-kubeevents
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, events, container-insights]
+  question: |
+    昨日の深夜に Pod が何度も再スケジュールされた原因を調べたいのですが、`kubectl get events` には何も残っていません。最も適切な調べ方はどれですか。
+  options:
+    - "Kubernetes のイベントは既定で約 1 時間しか保持されないため、Container Insights で Log Analytics に送られた `KubeEvents` テーブルを KQL で調べる"
+    - "`kubectl logs --previous` で昨日のイベントを表示する"
+    - "`kubectl describe node` の出力に過去すべてのイベントが残っている"
+    - "AKS ではイベントを後から調べる方法はない"
+  answer: A
+  explanation: |
+    Kubernetes のイベントはクラスター内に短時間（約 1 時間）しか保持されません。長期間の調査には、Container Insights で収集した `KubeEvents`（ほかに `KubePodInventory` など）を使います。
+  refs:
+    - https://learn.microsoft.com/azure/aks/events
+    - https://learn.microsoft.com/azure/azure-monitor/containers/container-insights-log-query
