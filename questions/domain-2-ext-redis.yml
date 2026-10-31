@@ -1,0 +1,447 @@
+# 分野 2 追加問題: Azure Managed Redis（2.11〜2.12）
+
+# ---------- 2.11 ----------
+- id: d-redis-stampede
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, cache, stampede]
+  question: |
+    人気の高い「よくある質問トップ 100」をキャッシュ アサイドで Redis に置いています（TTL 10 分）。TTL が切れた瞬間に数百のリクエストが同時にキャッシュ ミスし、全員が DB に重い集計クエリを投げて DB が過負荷になります。最も適切な対策はどれですか。
+  options:
+    - "`SET lock:faq <id> NX PX 10000` でロックを取れた 1 つのリクエストだけが再計算してキャッシュを更新し、他は少し待ってキャッシュを読み直す（または期限前に裏で更新する）"
+    - "TTL を 1 秒にする"
+    - "追い出しポリシーを `allkeys-random` にする"
+    - "キャッシュをやめて毎回 DB を読む"
+  answer: A
+  explanation: |
+    キャッシュの一斉失効による殺到（キャッシュ スタンピード）は、**再計算を 1 つに絞る**（分散ロック）か、期限切れ前に非同期で更新することで防ぎます。`SET ... NX PX` は「キーが無いときだけ設定し、一定時間で自動解除」されるので、ロックに使えます。TTL にジッターを入れるのも有効です。
+  refs:
+    - https://learn.microsoft.com/azure/architecture/patterns/cache-aside
+    - https://redis.io/docs/latest/commands/set/
+
+- id: d-redis-cache-pattern-match
+  objective: "2.11"
+  type: match
+  difficulty: 2
+  tags: [redis, cache, patterns]
+  question: |
+    要件に合うキャッシュの更新方式を対応付けてください。
+  pairs:
+    - left: "読み取りが圧倒的に多く、多少古い値でもよい。必要になったものだけキャッシュしたい"
+      right: "キャッシュ アサイド（読み取り時に読み込み、TTL で失効）"
+    - left: "書き込んだ直後から常に最新の値をキャッシュから読ませたい"
+      right: "ライトスルー（DB とキャッシュを同時に更新）"
+    - left: "書き込みが非常に多く、応答を速くしたい。DB への反映の遅れと失う可能性を許容できる"
+      right: "ライトビハインド（キャッシュに書き、後で非同期に DB へ）"
+  distractors:
+    - "キャッシュを使わない"
+  explanation: |
+    キャッシュ アサイドは最も一般的で、ミス時だけ読み込みます。ライトスルーは鮮度が高い一方、書き込みが遅くなります。ライトビハインドは高速ですが、障害時にデータを失うリスクがあります。
+  refs:
+    - https://learn.microsoft.com/azure/architecture/patterns/cache-aside
+
+- id: d-redis-chat-history
+  objective: "2.11"
+  type: dropdown
+  difficulty: 3
+  tags: [redis, list, ttl]
+  question: |
+    会話ごとに直近 20 件のメッセージだけを Redis に保持し、最後の発言から 30 分操作がなければ会話ごと消したいと考えています。新しいメッセージを追加するときに実行するコマンドを完成させてください。
+  language: text
+  template: |
+    {{1}} chat:{conversationId} "<新しいメッセージの JSON>"
+    {{2}} chat:{conversationId} 0 19
+    {{3}} chat:{conversationId} 1800
+  blanks:
+    "1": {options: [LPUSH, SADD, HSET], answer: LPUSH}
+    "2": {options: [LTRIM, LRANGE, ZREMRANGEBYRANK], answer: LTRIM}
+    "3": {options: [EXPIRE, PERSIST, TTL], answer: EXPIRE}
+  explanation: |
+    `LPUSH` で先頭に追加し、`LTRIM key 0 19` で先頭 20 件だけを残し、`EXPIRE` で TTL を毎回 1800 秒に延ばします（スライディング期限）。3 つをパイプラインや `MULTI` でまとめると往復が減り、途中の状態を見られにくくなります。
+  refs:
+    - https://redis.io/docs/latest/commands/ltrim/
+    - https://learn.microsoft.com/azure/redis/tutorial-agent-memory
+
+- id: d-redis-rate-limit
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, rate-limiting]
+  question: |
+    LLM の呼び出しを利用者ごとに 1 分あたり 20 回に制限します。`INCR rl:{user}:{分}` の結果が 1 のときだけ `EXPIRE` を設定する実装で、まれに TTL のないキーが残り、その利用者がずっと制限されてしまいます。原因と改善策として最も適切なものはどれですか。
+  options:
+    - "`INCR` と `EXPIRE` の間でプロセスが落ちると TTL が付かない。`MULTI`/`EXEC` やスクリプトでまとめて実行する（または毎回 `EXPIRE ... NX` を付ける）"
+    - "`INCR` はスレッド セーフではないため、アプリでロックを取る"
+    - "追い出しポリシーを `noeviction` にする"
+    - "キーに TTL を付けずに、毎晩手動で消す"
+  answer: A
+  explanation: |
+    2 つのコマンドの間で失敗すると、カウンターだけが残ります。トランザクション（`MULTI`/`EXEC`）や Lua スクリプトでまとめる、あるいは毎回 TTL を設定するなど、TTL が必ず付くようにします。`INCR` 自体は原子的です。
+  refs:
+    - https://redis.io/docs/latest/commands/incr/
+    - https://redis.io/docs/latest/develop/interact/transactions/
+
+- id: d-redis-big-value
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, performance]
+  question: |
+    検索結果全体（約 5 MB の JSON）を 1 つの String キーにキャッシュしています。このキーを読むたびに、他のリクエストの遅延も跳ね上がります。最も適切な改善はどれですか。
+  options:
+    - "値を小さく分割する（ページ単位・項目単位のキーや Hash に分ける、必要な部分だけ保存する）か、圧縮する"
+    - "TTL を長くする"
+    - "Compute Optimized にすれば大きな値でも影響はない"
+    - "`KEYS *` で事前に読み込む"
+  answer: A
+  explanation: |
+    Redis は大きな値の転送中に他のコマンドの処理が遅れることがあり、ネットワークも圧迫します。値は小さく保つ（一般に 100 KB 程度以下を目安）のがベスト プラクティスです。
+  refs:
+    - https://learn.microsoft.com/azure/redis/best-practices-client-libraries
+
+- id: d-redis-hash-partial
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, hash]
+  question: |
+    ユーザー プロファイル（表示名、言語、最終ログインなど 20 項目）をキャッシュしています。最終ログインだけを頻繁に更新するのに、毎回 JSON 全体を読み込んで書き換えています。Redis のデータ型の選び方として最も適切なものはどれですか。
+  options:
+    - "Hash（`HSET profile:{id} lastLogin <時刻>`）で項目ごとに読み書きする"
+    - "List にすべての項目を入れる"
+    - "Set にすべての項目を入れる"
+    - "String の JSON のまま、TTL を長くする"
+  answer: A
+  explanation: |
+    Hash はフィールド単位で読み書きでき、一部の項目だけを更新するのに向いています。入れ子の構造や JSON のパスでの更新・検索が必要なら RedisJSON も選択肢です。
+  refs:
+    - https://redis.io/docs/latest/develop/data-types/hashes/
+
+- id: d-redis-roundtrips
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, pipeline]
+  question: |
+    1 回の API 呼び出しで、50 個の商品キーを順番に `GET` しているため、Redis との往復で 50 ms 以上かかっています。最も効果的な改善はどれですか。
+  options:
+    - "`MGET` やパイプラインで 1 回（または少ない回数）の往復にまとめる"
+    - "50 個の接続を新しく作って並列に GET する"
+    - "TTL を短くする"
+    - "Flash Optimized にする"
+  answer: A
+  explanation: |
+    小さなコマンドを多数実行する場合、遅延の大半はネットワークの往復です。`MGET` やパイプラインでまとめると往復回数を減らせます。接続を大量に作るのはアンチパターンで、接続は使い回します。
+  refs:
+    - https://redis.io/docs/latest/develop/use/pipelining/
+    - https://learn.microsoft.com/azure/redis/best-practices-client-libraries
+
+- id: d-redis-entra-reauth
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, entra-id, authentication]
+  question: |
+    Azure Managed Redis に Microsoft Entra ID で接続しています。自前でトークンを取得して `AUTH` しているアプリが、約 1 時間後に認証エラーで切断されるようになりました。最も適切な対処はどれですか。
+  options:
+    - "`redis-entraid`（Python）などのクライアント ライブラリの Entra 統合を使い、トークンの期限前に自動で再認証させる"
+    - "アクセス キー認証に戻し、キーを環境変数に置く"
+    - "接続のタイムアウトを 24 時間にする"
+    - "TTL を 1 時間より長くする"
+  answer: A
+  explanation: |
+    Entra のトークンには有効期限があるため、長時間の接続では期限前に新しいトークンで再認証する必要があります。公式のクライアント拡張（Python の `redis-entraid`、.NET の `Microsoft.Azure.StackExchangeRedis` など）はこれを自動で行います。
+  refs:
+    - https://learn.microsoft.com/azure/redis/entra-for-authentication
+
+- id: d-redis-eviction-choice
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, eviction]
+  question: |
+    Azure Managed Redis（モジュールなし）を純粋なキャッシュとして使っています。アプリの一部が TTL を付けずにキーを書き込んでおり、メモリが一杯になると書き込みがエラーになります。どのキーも消えてかまわないので、メモリ不足時は古いものから自動で消してほしいです。どうしますか。
+  options:
+    - "追い出しポリシーを `allkeys-lru`（または `allkeys-lfu`）にする"
+    - "既定の `volatile-lru` のままにする"
+    - "`noeviction` にする"
+    - "RediSearch モジュールを追加する"
+  answer: A
+  explanation: |
+    既定の `volatile-lru` は TTL のあるキーだけを追い出すため、TTL のないキーばかりだと追い出せずに書き込みエラーになります。すべてのキーを追い出し対象にするのが `allkeys-*` です。ただし RediSearch を使うインスタンスは `NoEviction` が必須です。
+  refs:
+    - https://learn.microsoft.com/azure/redis/best-practices-memory-management
+
+- id: d-redis-persistence
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, persistence]
+  question: |
+    エージェントの短期メモリを Azure Managed Redis に保存しています。計画外のメンテナンスや障害でインスタンス全体が再起動した場合でも、データをできるだけ失いたくないと言われました。最も適切な機能はどれですか（Redis を唯一の正本にすることのリスクは理解している前提）。
+  options:
+    - "データ永続化（RDB スナップショットまたは AOF）を有効にする"
+    - "Flash Optimized にすれば、データはディスクにあるので失われない"
+    - "追い出しポリシーを `noeviction` にする"
+    - "クラスタリング ポリシーを OSS にする"
+  answer: A
+  explanation: |
+    **データ永続化**は、メモリ上のデータのコピーをディスクに保存し、障害後の復旧に使います。Flash Optimized は容量のためにデータを NVMe に置く階層化で、耐障害性を高める機能ではありません。重要なデータは Cosmos DB や PostgreSQL を正本にするのが基本です。
+  refs:
+    - https://learn.microsoft.com/azure/redis/overview
+    - https://learn.microsoft.com/azure/redis/how-to-persistence
+
+- id: d-redis-sliding-expiry
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, ttl]
+  question: |
+    セッションを「最後のアクセスから 30 分」で失効させたいと考えています（アクセスのたびに期限を延ばす）。読み取りと期限の延長を 1 つのコマンドで行うには、どれを使いますか。
+  options:
+    - "`GETEX session:{id} EX 1800`"
+    - "`GET session:{id}` のみ"
+    - "`PERSIST session:{id}`"
+    - "`SET session:{id} <値>`（`EX` なし）"
+  answer: A
+  explanation: |
+    `GETEX` は値を返しつつ、有効期限を設定し直せます（`EX` / `PX` / `PERSIST` など）。`SET` を `EX` なしで実行すると TTL が消えてしまいます。
+  refs:
+    - https://redis.io/docs/latest/commands/getex/
+
+- id: d-redis-pubsub-streams-facts
+  objective: "2.11"
+  type: yesno
+  difficulty: 2
+  tags: [redis, pubsub, streams]
+  question: |
+    Redis の pub/sub と Streams について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "pub/sub で発行したメッセージは、その時点で購読していないクライアントには届かず、後から読むこともできない。"
+      answer: true
+    - text: "Streams のコンシューマー グループでは、同じメッセージが同じグループの全コンシューマーに配られる。"
+      answer: false
+    - text: "Streams では、`XACK` されていないメッセージは保留エントリ リスト（PEL）に残る。"
+      answer: true
+    - text: "複数のアプリ インスタンスが持つローカル キャッシュを一斉に無効化する通知には、pub/sub が向いている。"
+      answer: true
+  explanation: |
+    pub/sub は永続化しないブロードキャストです。Streams はストリームにメッセージを保存し、コンシューマー グループ内では 1 メッセージを 1 つのコンシューマーに割り当てて分担します（別のグループはそれぞれ全メッセージを受け取る）。
+  refs:
+    - https://redis.io/docs/latest/develop/interact/pubsub/
+    - https://redis.io/docs/latest/develop/data-types/streams/
+
+# ---------- 2.12 ----------
+- id: d-redis-knn-syntax
+  objective: "2.12"
+  type: dropdown
+  difficulty: 3
+  tags: [redis, redisearch, knn]
+  question: |
+    テナント `contoso` の文書だけを対象に、質問ベクトルに最も近い 5 件を距離の昇順で返すクエリを完成させてください（Python の redis-py）。
+  language: python
+  template: |
+    q = (Query("(@tenant:{{1}})=>[{{2}} 5 @embedding $vec AS score]")
+         .sort_by("score")
+         .return_fields("content", "score")
+         .dialect({{3}}))
+    res = r.ft("idx:chunks").search(q, query_params={"vec": query_vector.astype(np.float32).{{4}}()})
+  blanks:
+    "1": {options: ["{contoso}", "contoso", "[contoso]"], answer: "{contoso}"}
+    "2": {options: [KNN, TOP, NEAREST], answer: KNN}
+    "3": {options: ["2", "1", "0"], answer: "2"}
+    "4": {options: [tobytes, tolist, tostring], answer: tobytes}
+  explanation: |
+    TAG フィールドの条件は `@field:{値}` と書き、`=>[KNN k @ベクトル フィールド $パラメーター AS 別名]` で前段のフィルターに一致した中から KNN 検索します。ベクトルのパラメーターは **DIALECT 2** が必要で、HASH に保存したベクトルと同じ型（FLOAT32）のバイト列で渡します。
+  refs:
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+    - https://learn.microsoft.com/azure/redis/overview-vector-similarity
+
+- id: d-redis-vector-range
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, semantic-cache, range]
+  question: |
+    セマンティック キャッシュで、「距離が 0.1 以内（コサイン距離）の過去の質問があれば、その回答を返す。なければ LLM を呼ぶ」という判定をしたいです。上位 k 件ではなく**距離のしきい値**で探すには、RediSearch のどの機能を使いますか。
+  options:
+    - "範囲クエリ（`@embedding:[VECTOR_RANGE 0.1 $vec]`）"
+    - "`KNN 1000` で全件取得してアプリで判定する"
+    - "TAG フィールドの完全一致"
+    - "`SCAN` で全キーを走査する"
+  answer: A
+  explanation: |
+    `VECTOR_RANGE` は指定した距離（半径）以内のベクトルを返します。しきい値ベースの判定に向いています。KNN は件数で区切るため、遠い候補も返ります。
+  refs:
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+
+- id: d-redis-flat-vs-hnsw
+  objective: "2.12"
+  type: single
+  difficulty: 2
+  tags: [redis, redisearch, index]
+  question: |
+    社内 FAQ のベクトル（約 3 万件、768 次元）を Redis で検索します。件数が少なく、検索結果は総当たりと同じ正確さにしたいです。インデックスのアルゴリズムとして最も適切なものはどれですか。
+  options:
+    - "`FLAT`"
+    - "`HNSW`（`M` を小さく）"
+    - "インデックスを作らず `SCAN` で全件比較する"
+    - "`TAG` フィールドだけで検索する"
+  answer: A
+  explanation: |
+    `FLAT` は総当たりで正確な結果を返し、数万件程度なら十分高速です。`HNSW` は大規模で低遅延が必要な場合の近似検索です。
+  refs:
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+
+- id: d-redis-json-index
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, redisjson, redisearch]
+  question: |
+    チャンクを RedisJSON のドキュメント（`{"content": "...", "meta": {"tenant": "contoso"}, "embedding": [0.01, ...]}`）として保存しています。このドキュメントをベクトル検索するインデックスの定義として正しいものはどれですか。
+  options:
+    - "`FT.CREATE idx ON JSON PREFIX 1 chunk: SCHEMA $.meta.tenant AS tenant TAG $.embedding AS embedding VECTOR HNSW 6 TYPE FLOAT32 DIM 1536 DISTANCE_METRIC COSINE`"
+    - "`FT.CREATE idx ON HASH PREFIX 1 chunk: SCHEMA meta.tenant TAG embedding VECTOR ...`"
+    - "`JSON.SET idx $ VECTOR`"
+    - "RedisJSON のドキュメントはベクトル検索できない"
+  answer: A
+  explanation: |
+    JSON ドキュメントには `ON JSON` を指定し、JSONPath（`$.embedding`）でフィールドを指定して `AS` で別名を付けます。JSON ではベクトルは数値の配列として保存されます（HASH ではバイナリ）。
+  refs:
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+
+- id: d-redis-auto-index
+  objective: "2.12"
+  type: yesno
+  difficulty: 2
+  tags: [redis, redisearch]
+  question: |
+    `FT.CREATE idx:chunks ON HASH PREFIX 1 chunk: SCHEMA ...` でインデックスを作成済みです。次の記述が正しいかを答えてください。
+  statements:
+    - text: "その後 `HSET chunk:123 ...` でキーを書き込むと、自動でインデックスに追加される。"
+      answer: true
+    - text: "`DEL chunk:123` でキーを削除すると、インデックスからも削除される。"
+      answer: true
+    - text: "`HSET doc:123 ...`（プレフィックスが違う）で書き込んだキーも、このインデックスで検索できる。"
+      answer: false
+    - text: "インデックス作成前からある `chunk:` で始まるキーも、インデックス作成時に索引付けされる。"
+      answer: true
+  explanation: |
+    RediSearch のインデックスは、指定したプレフィックスのキーの作成・更新・削除を自動で追跡します（既存のキーは作成時にスキャンされる）。アプリから「インデックスに追加する」操作は不要です。
+  refs:
+    - https://redis.io/docs/latest/develop/interact/search-and-query/
+
+- id: d-redis-cache-invalidation-rag
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, semantic-cache, invalidation]
+  question: |
+    セマンティック キャッシュに「質問の埋め込み → 回答」を TTL 24 時間で保存しています。製品マニュアルが改訂されたのに、改訂前の内容に基づく回答がキャッシュから返されてしまいます。最も適切な改善はどれですか。
+  options:
+    - "キャッシュ エントリに回答の根拠になった文書 ID（やバージョン）を TAG として持たせ、文書が更新されたら該当エントリを削除する（TTL も併用）"
+    - "類似度のしきい値を緩める"
+    - "TTL を 30 日に延ばす"
+    - "ベクトル インデックスを FLAT にする"
+  answer: A
+  explanation: |
+    セマンティック キャッシュも、元データが変わったときの**無効化**が必要です。エントリに根拠の文書 ID を持たせておけば、文書の更新イベント（変更フィードなど）で関連するエントリだけを削除できます。
+  refs:
+    - https://learn.microsoft.com/azure/redis/tutorial-semantic-cache
+
+- id: d-redis-distance-threshold
+  objective: "2.12"
+  type: single
+  difficulty: 2
+  tags: [redis, distance]
+  question: |
+    RediSearch のインデックスは `DISTANCE_METRIC COSINE` です。KNN の結果の `score` が `0.08` でした。この結果について正しい説明はどれですか。
+  options:
+    - "コサイン距離が 0.08 で、コサイン類似度は約 0.92。かなり似ている"
+    - "コサイン類似度が 0.08 で、ほとんど似ていない"
+    - "8% の確率で一致する"
+    - "score は常に 0〜100 の点数である"
+  answer: A
+  explanation: |
+    COSINE メトリックの `score` は**距離**（1 − コサイン類似度）で、小さいほど似ています。しきい値を決めるときは、距離か類似度かを取り違えないことが重要です。
+  refs:
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+
+- id: d-redis-hnsw-memory
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, hnsw, memory]
+  question: |
+    HNSW のベクトル インデックスを持つ Azure Managed Redis で、メモリ使用率が想定より高くなっています。データ（ベクトル）そのもののサイズは見積もりどおりです。原因と対策として最も適切なものはどれですか。
+  options:
+    - "HNSW のグラフ構造（パラメーター `M` に比例する近傍リンク）がベクトルとは別にメモリを使う。`M` を見直すか、より大きな SKU にする。メモリ使用率をメトリックで監視する"
+    - "ベクトルは圧縮されるので、メモリは使わない"
+    - "TTL を付ければインデックスのメモリが不要になる"
+    - "追い出しポリシーを `allkeys-lru` にする"
+  answer: A
+  explanation: |
+    ベクトル インデックスはデータ本体に加えてインデックス構造のメモリを使います。HNSW では `M`（ノードあたりのリンク数）が大きいほどメモリが増え、リコールは上がります。RediSearch 使用時は NoEviction が必須なので、容量の見積もりと監視が重要です。
+  refs:
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+    - https://learn.microsoft.com/azure/redis/best-practices-memory-management
+
+- id: d-redis-semantic-router
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, semantic-routing]
+  question: |
+    問い合わせを「請求」「技術サポート」「解約」のどの処理に振り分けるかを、LLM を呼ぶ前に低遅延で判定したいと考えています。各ルートに代表的な例文をいくつか用意できます。Azure Managed Redis を使った方法として最も適切なものはどれですか。
+  options:
+    - "例文の埋め込みを Redis に保存し、問い合わせの埋め込みと最も近いルートをベクトル検索で選ぶ（セマンティック ルーティング。しきい値を超えたら既定のルートへ）"
+    - "問い合わせ文を TAG フィールドで完全一致検索する"
+    - "pub/sub で全ルートに配信する"
+    - "ルートごとに別の Redis インスタンスを作る"
+  answer: A
+  explanation: |
+    セマンティック ルーティングは、ベクトル検索とアプリのロジックで実装するパターンです（RedisVL の SemanticRouter など）。完全一致では言い回しの違いに対応できません。
+  refs:
+    - https://learn.microsoft.com/azure/redis/tutorial-semantic-router
+
+- id: d-redis-agent-memory
+  objective: "2.12"
+  type: match
+  difficulty: 3
+  tags: [redis, agent-memory]
+  question: |
+    AI エージェントのメモリを Azure Managed Redis で実装します。保存する情報と、適した保存方法を対応付けてください。
+  pairs:
+    - left: "直近の会話のやり取り（一定時間で消えてよい）"
+      right: "List / Stream に保存し、件数の上限と TTL を付ける"
+    - left: "利用者の好みや過去の重要な事実（意味の近さで思い出したい）"
+      right: "埋め込みとメタデータを HASH / JSON に保存し、ベクトル検索する"
+    - left: "現在のツール実行の状態（チェックポイント）"
+      right: "Hash に保存し、セッション終了時や TTL で削除する"
+  distractors:
+    - "pub/sub で発行する"
+  explanation: |
+    エージェントのメモリは、短期（会話・セッション状態、TTL で自動削除）と長期（意味で検索する事実・要約、ベクトル検索）の 2 層で設計するのが一般的です。長期記憶の検索には RediSearch が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/redis/tutorial-agent-memory
+
+- id: d-redis-tier-choice-vector
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, tiers, redisearch]
+  question: |
+    数 TB の製品カタログをキャッシュしつつ、同じインスタンスでベクトル検索もしたいと提案されました。コストを抑えるため Flash Optimized を使いたいとのことです。正しい判断はどれですか。
+  options:
+    - "Flash Optimized は RediSearch を使えないため、ベクトル検索は in-memory のレベル（Memory Optimized / Balanced / Compute Optimized）のインスタンスで行う。大容量のキャッシュとは分けることも検討する"
+    - "Flash Optimized でも、作成後に RediSearch を追加すればよい"
+    - "Flash Optimized は OSS クラスタリングにすれば RediSearch を使える"
+    - "ベクトル検索は Azure Cache for Redis Basic で行う"
+  answer: A
+  explanation: |
+    RediSearch は Memory Optimized / Balanced / Compute Optimized で使え、Flash Optimized では使えません（RedisJSON のみ可）。モジュールは作成時にしか追加できず、RediSearch には Enterprise ポリシーが必要です。
+  refs:
+    - https://learn.microsoft.com/azure/redis/redis-modules
+    - https://learn.microsoft.com/azure/redis/plan-tiers-and-capacity
