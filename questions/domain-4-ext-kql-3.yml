@@ -1,0 +1,469 @@
+# 分野 4 追加問題（3 周目）: KQL（4.4）
+
+- id: m-kql-integer-division
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, countif, division]
+  question: |
+    次のクエリで失敗率を求めたところ、失敗があるのに `failureRate` が常に 0 になりました。
+    ```
+    requests
+    | where timestamp > ago(1h)
+    | summarize failureRate = countif(success == false) / count()
+    ```
+    最も適切な修正はどれですか。
+  options:
+    - "`countif(success == false) * 100.0 / count()` のように実数を掛けてから割る（整数どうしの割り算で切り捨てられている）"
+    - "`countif` を `dcountif` に変える"
+    - "`success == false` を `success == \"False\"` に変える"
+    - "`summarize` を `extend` に変える"
+  answer: A
+  explanation: |
+    `countif()` と `count()` はどちらも整数（long）を返すため、整数どうしの割り算になり、1 未満の値は 0 に切り捨てられます。`100.0` や `todouble()` で実数にしてから割ると、正しい割合（%）が得られます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/countif-aggregation-function
+    - https://learn.microsoft.com/kusto/query/scalar-data-types/real
+
+- id: m-kql-project-family
+  objective: "4.4"
+  type: match
+  difficulty: 2
+  tags: [kql, project, extend]
+  question: |
+    やりたいことと、使う KQL の演算子を対応付けてください。
+  pairs:
+    - left: "既存の列はすべて残したまま、計算した列を追加する"
+      right: "extend"
+    - left: "指定した列だけを残し、それ以外を捨てる"
+      right: "project"
+    - left: "指定した列だけを捨て、それ以外は残す"
+      right: "project-away"
+    - left: "列の名前だけを変える"
+      right: "project-rename"
+  distractors:
+    - "summarize"
+  explanation: |
+    `extend` は列を追加し、`project` は列を選択（と計算）します。不要な列を数個だけ除きたいときは `project-away`、名前を変えるだけなら `project-rename` が簡潔です。早めに列を絞ると、後続の処理のデータ量が減ります。
+  refs:
+    - https://learn.microsoft.com/kusto/query/project-operator
+    - https://learn.microsoft.com/kusto/query/extend-operator
+
+- id: m-kql-mv-expand
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, mv-expand, dynamic]
+  question: |
+    RAG の検索スパン（`dependencies`）の `customDimensions["rag.doc_ids"]` に、取得した文書 ID の JSON 配列（例: `["d1","d7","d9"]`）が入っています。直近 1 日で、各文書が何回検索結果に含まれたかを数えたいです。最も適切なクエリはどれですか。
+  options:
+    - "`dependencies | where timestamp > ago(1d) | extend ids = todynamic(tostring(customDimensions[\"rag.doc_ids\"])) | mv-expand doc = ids | summarize hits = count() by tostring(doc)`"
+    - "`dependencies | summarize hits = count() by tostring(customDimensions[\"rag.doc_ids\"])`"
+    - "`dependencies | where customDimensions has \"d1\" | count`"
+    - "`dependencies | distinct customDimensions`"
+  answer: A
+  explanation: |
+    配列を要素ごとの行に展開するのが `mv-expand` です。文字列で格納されている場合は `todynamic()` で配列に変換してから展開し、要素ごとに集計します。配列のまま集計すると、「d1, d7, d9 の組み合わせ」ごとの件数になってしまいます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/mv-expand-operator
+
+- id: m-kql-local-time
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, timezone, datetime]
+  question: |
+    日本の利用者の行動を分析するため、要求数を**日本時間の**時間帯（0〜23 時）ごとに集計したいです。`timestamp` は UTC です。最も適切なクエリはどれですか。
+  options:
+    - "`requests | extend jst = datetime_utc_to_local(timestamp, \"Asia/Tokyo\") | summarize count() by hour = hourofday(jst)`"
+    - "`requests | summarize count() by hour = hourofday(timestamp)`"
+    - "`requests | summarize count() by bin(timestamp, 1h)`"
+    - "`requests | extend jst = timestamp - 9h | summarize count() by bin(jst, 1d)`"
+  answer: A
+  explanation: |
+    ログの時刻は UTC で記録されるため、現地時間で分析するときは `datetime_utc_to_local()` でタイムゾーンを変換してから `hourofday()` などで時間帯を取り出します（日本は夏時間がないので +9 時間でも同じ結果ですが、関数を使えば夏時間のある地域でも正しく扱えます）。変換せずに集計すると、9 時間ずれた時間帯になります。
+  refs:
+    - https://learn.microsoft.com/kusto/query/datetime-utc-to-local-function
+    - https://learn.microsoft.com/kusto/query/hour-of-day-function
+
+- id: m-kql-prev-gap
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, prev, serialize]
+  question: |
+    ワーカーは処理のたびに `traces` に「job completed」を出力します。ワーカーが止まっていた時間を見つけるため、連続する完了ログの間隔が 10 分を超えた箇所を一覧したいです。最も適切なクエリはどれですか。
+  options:
+    - "`traces | where message == \"job completed\" | order by timestamp asc | extend gap = timestamp - prev(timestamp) | where gap > 10m`"
+    - "`traces | where message == \"job completed\" | summarize max(timestamp) - min(timestamp)`"
+    - "`traces | where message == \"job completed\" | extend gap = timestamp - ago(10m)`"
+    - "`traces | where message == \"job completed\" | take 10`"
+  answer: A
+  explanation: |
+    `prev()` は直前の行の値を参照する関数で、行の順序が決まっている（シリアル化されている）必要があります。`order by` で時刻順に並べてから、前の行との差を計算します。`order by` の既定は降順なので、時系列の差を取るときは `asc` を明示します。
+  refs:
+    - https://learn.microsoft.com/kusto/query/prev-function
+    - https://learn.microsoft.com/kusto/query/serialize-operator
+
+- id: m-kql-cross-resource
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, cross-resource, workspace]
+  question: |
+    API は Log Analytics ワークスペース `law-api`、ワーカーはワークスペース `law-worker` に、それぞれワークスペース ベースの Application Insights のデータを送っています。`law-api` からクエリを実行して、両方の要求の失敗をまとめて数えたいです。最も適切なクエリはどれですか。
+  options:
+    - "`union AppRequests, workspace(\"law-worker\").AppRequests | where Success == false | summarize count() by AppRoleName`"
+    - "`AppRequests | join workspace(\"law-worker\") on Success`"
+    - "2 つのワークスペースのデータは結合できないので、別々に実行して手で足す"
+    - "`requests | where cloud_RoleName in (\"api\", \"worker\")` を `law-api` で実行する"
+  answer: A
+  explanation: |
+    `workspace("名前")` 関数で別のワークスペースのテーブルを参照でき、`union` で行を縦に連結できます（Application Insights のリソースは `app("名前")` で参照できます）。ワークスペースのテーブルでは、Application Insights のクラシック名（`requests`）ではなく `AppRequests` などの名前と列名（`Success`、`AppRoleName`）を使います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/logs/cross-workspace-query
+    - https://learn.microsoft.com/kusto/query/union-operator
+
+- id: m-kql-extract
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, extract, regex]
+  question: |
+    ログのメッセージに `LLM call failed: status=429 model=gpt-4o retry_after=12` のような文字列が出力されています。直近 1 時間で、状態コードごとの件数を数えたいです。最も適切な式はどれですか。
+  options:
+    - "`extend status = extract(@\"status=(\\d+)\", 1, message) | summarize count() by status`"
+    - "`extend status = substring(message, 20, 3) | summarize count() by status`"
+    - "`where message has \"status\" | summarize count() by message`"
+    - "`extend status = split(message, \"=\")[0] | summarize count() by status`"
+  answer: A
+  explanation: |
+    `extract(正規表現, キャプチャ グループ番号, 文字列)` で、正規表現に一致した部分を取り出せます。固定の位置で切り出す `substring` は、メッセージの形式が少し変わるだけで壊れます。決まった形式なら `parse` 演算子も使えます。可能なら、ログに構造化された属性（`status` など）として記録しておくと、こうした抽出は不要になります。
+  refs:
+    - https://learn.microsoft.com/kusto/query/extract-function
+
+- id: m-kql-case-bucket
+  objective: "4.4"
+  type: dropdown
+  difficulty: 2
+  tags: [kql, case, buckets]
+  question: |
+    要求を応答時間で「fast（1 秒未満）」「ok（1〜3 秒）」「slow（3 秒以上）」に分類して数えるクエリを完成させてください。
+  language: kql
+  template: |
+    requests
+    | where timestamp > ago(1d)
+    | extend bucket = {{1}}(duration < 1000, "fast",
+                           duration < 3000, "ok",
+                           "slow")
+    | summarize n = count() {{2}} bucket
+    | {{3}} timechart
+  blanks:
+    "1":
+      options: ["case", "iff", "switch", "if"]
+      answer: "case"
+    "2":
+      options: ["by", "on", "with", "of"]
+      answer: "by"
+    "3":
+      options: ["render", "project", "make-series", "plot"]
+      answer: "render"
+  explanation: |
+    `case(条件1, 値1, 条件2, 値2, ..., 既定値)` は、上から順に条件を評価して最初に満たした値を返します（2 択なら `iff`）。分類した列で `summarize ... by` し、`render` でグラフにします（この例のように時間の列がない集計なら `barchart` や `piechart` が適しています）。
+  refs:
+    - https://learn.microsoft.com/kusto/query/case-function
+    - https://learn.microsoft.com/kusto/query/render-operator
+
+- id: m-kql-itemcount
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, sampling, itemcount]
+  question: |
+    Application Insights でサンプリング（25%）を有効にしています。KQL で `requests | summarize count()` とすると、実際の要求数の約 4 分の 1 になります。サンプリングを考慮して要求数を推定する正しい書き方はどれですか。
+  options:
+    - "`requests | summarize sum(itemCount)`"
+    - "`requests | summarize count() * 25`"
+    - "`requests | summarize dcount(id)`"
+    - "サンプリングされたデータからは推定できない"
+  answer: A
+  explanation: |
+    サンプリングで残ったテレメトリには、それが何件分を代表しているかが `itemCount` 列に記録されます（25% なら 4）。件数は `count()` ではなく `sum(itemCount)` で推定します。ポータルのグラフは自動でこの補正をしていますが、自分で書く KQL では明示的に行う必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-sampling
+    - https://learn.microsoft.com/azure/azure-monitor/app/sampling-classic-api#knowing-whether-sampling-is-in-operation
+
+- id: m-kql-case-insensitive
+  objective: "4.4"
+  type: yesno
+  difficulty: 2
+  tags: [kql, string-operators]
+  question: |
+    `cloud_RoleName` の値が `RAG-API` の行があります。次の条件のうち、この行に一致するかを答えてください。
+  statements:
+    - text: "`where cloud_RoleName == \"rag-api\"` に一致する。"
+      answer: false
+    - text: "`where cloud_RoleName =~ \"rag-api\"` に一致する。"
+      answer: true
+    - text: "`where cloud_RoleName in~ (\"rag-api\", \"rag-worker\")` に一致する。"
+      answer: true
+    - text: "`where cloud_RoleName has \"rag\"` に一致する。"
+      answer: true
+  explanation: |
+    `==` と `in` は大文字と小文字を区別し、`=~` と `in~` は区別しません。`has` も区別しません（`has_cs` は区別します）。パフォーマンスの面では区別する演算子の方が速いので、値の大文字・小文字が決まっているなら `==` を使います。
+  refs:
+    - https://learn.microsoft.com/kusto/query/datatypes-string-operators
+
+- id: m-kql-make-set
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, make-set, exceptions]
+  question: |
+    失敗したリクエストごとに、その処理中に発生した例外の種類を 1 行にまとめて表示したいです（例外が複数あれば重複なしの一覧にする）。最も適切なクエリはどれですか。
+  options:
+    - "`exceptions | where timestamp > ago(1h) | summarize types = make_set(type), n = count() by operation_Id`"
+    - "`exceptions | where timestamp > ago(1h) | distinct type`"
+    - "`exceptions | where timestamp > ago(1h) | summarize count() by type`"
+    - "`exceptions | where timestamp > ago(1h) | take 1`"
+  answer: A
+  explanation: |
+    `make_set()` は重複を除いた値の配列を作る集計関数で（重複を含めるなら `make_list()`）、`by operation_Id` でトレースごとにまとめられます。`summarize count() by type` は種類ごとの件数で、リクエストごとのまとまりにはなりません。
+  refs:
+    - https://learn.microsoft.com/kusto/query/make-set-aggregation-function
+
+- id: m-kql-join-innerunique
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, join, innerunique]
+  question: |
+    `requests`（左）と `dependencies`（右）を `operation_Id` で `join` しました。1 つのトレースに同じ `operation_Id` の要求が 2 件（API とワーカー）ある場合、結果に一方の要求しか現れません。種類を指定せずに `join` を書いています。原因として正しいものはどれですか。
+  options:
+    - "`join` の既定の種類は `innerunique` で、左側のテーブルを結合キーで重複除去してから結合するため。すべての組み合わせが必要なら `kind=inner` を指定する"
+    - "`join` は 1 対 1 の結合しかできない"
+    - "`operation_Id` は結合キーとして使えない"
+    - "`dependencies` のサンプリングが原因"
+  answer: A
+  explanation: |
+    KQL の `join` は既定で `kind=innerunique` となり、左側のテーブルで結合キーが重複する行は 1 行だけ残されます。意図せず行が欠ける原因になりやすいので、目的に合わせて `kind=inner`、`kind=leftouter` などを明示します。
+  refs:
+    - https://learn.microsoft.com/kusto/query/join-operator
+
+- id: m-kql-alert-split
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, log-alerts, dimensions]
+  question: |
+    5 つのコンテナー アプリ（`cloud_RoleName` で区別）の失敗数を 1 つのログ検索アラート ルールで監視し、どのアプリで問題が起きたかがアラートごとにわかるようにしたいです。最も適切な構成はどれですか。
+  options:
+    - "クエリで `summarize failed = countif(success == false) by cloud_RoleName, bin(timestamp, 5m)` のように集計し、アラート ルールで `cloud_RoleName` をディメンションとして分割する（アプリごとに個別のアラートが発生する）"
+    - "アプリごとに 5 つのアクション グループを作る"
+    - "すべてのアプリの失敗数を合計して 1 つのしきい値で判定する"
+    - "メトリック アラートの CPU 使用率で代用する"
+  answer: A
+  explanation: |
+    ログ検索アラートでは、結果の列を**ディメンション**として分割でき、ディメンションの値ごとに独立して評価・通知されます。1 つのルールで複数のアプリを監視でき、アラートにはどのアプリかが含まれます。合計で判定すると、どのアプリの問題かわからず、小さなアプリの障害が埋もれます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/alerts/alerts-create-log-alert-rule#configure-dimensions
+
+- id: m-kql-anomalies
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, make-series, anomaly-detection]
+  question: |
+    LLM の呼び出し回数には曜日と時間帯による周期があり、固定のしきい値では誤検知が多くなります。通常のパターンから外れた急増・急減だけを検知したい場合、KQL で最も適切な方法はどれですか。
+  options:
+    - "`make-series` で時系列を作り、`series_decompose_anomalies()` で季節性と傾向を考慮した異常を検出する"
+    - "`summarize avg()` の値を毎回手で確認する"
+    - "`take 100` で最新の値だけを見る"
+    - "しきい値を非常に大きくする"
+  answer: A
+  explanation: |
+    `series_decompose_anomalies()` は、時系列を季節性・傾向・残差に分解し、残差が大きい点を異常として返します。周期のあるデータでも、「いつもと違う」動きだけを検出できます。時系列は欠損を 0 で埋められる `make-series` で作ります。メトリック アラートの動的しきい値も同様の目的で使えます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/series-decompose-anomalies-function
+    - https://learn.microsoft.com/azure/azure-monitor/logs/kql-machine-learning-azure-monitor
+
+- id: m-kql-severity
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, traces, severity]
+  question: |
+    Application Insights の `traces` テーブルで、警告（Warning）以上のログだけを表示したいです。正しい条件はどれですか。
+  options:
+    - "`where severityLevel >= 2`（0: Verbose、1: Information、2: Warning、3: Error、4: Critical）"
+    - "`where severityLevel <= 2`"
+    - "`where severityLevel == \"Warning\"`"
+    - "`where message has \"warning\"`"
+  answer: A
+  explanation: |
+    `severityLevel` は数値で、大きいほど重大です（Warning = 2、Error = 3、Critical = 4）。メッセージの文字列で判定すると、本文に「warning」を含むだけの行も拾ったり、逆に取りこぼしたりします。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/reference/tables/apptraces
+    - https://learn.microsoft.com/azure/azure-monitor/app/data-model-complete
+
+- id: m-kql-ingestion-latency
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, ingestion-time, alerts]
+  question: |
+    「直近 1 分間の失敗数」を 1 分ごとに数えるクエリでアラートを作ったところ、実際には失敗しているのに 0 件になって見逃すことがありました。最も可能性の高い原因と対処はどれですか。
+  options:
+    - "ログが取り込まれるまでに数分の遅延があり、直近 1 分のデータがまだ揃っていない。評価の時間枠を長くする、少し前の時間帯を見る、または `ingestion_time()` を考慮する（即時性が必要ならメトリック アラートを使う）"
+    - "`count()` ではなく `dcount()` を使う"
+    - "`timestamp` は日本時間で記録されているため"
+    - "1 分間に 1 件しか記録できないため"
+  answer: A
+  explanation: |
+    ログはアプリから送信されてから検索できるようになるまで、通常数分の取り込み遅延があります。`timestamp`（発生時刻）で直近の短い時間枠を数えると、まだ取り込まれていないデータを取りこぼします。`ingestion_time()` は取り込まれた時刻を返すので、遅延の調査にも使えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/logs/data-ingestion-time
+    - https://learn.microsoft.com/kusto/query/ingestion-time-function
+
+- id: m-kql-order-default
+  objective: "4.4"
+  type: yesno
+  difficulty: 2
+  tags: [kql, order-by, sort]
+  question: |
+    KQL の並べ替えと件数の制限について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`order by duration` と書くと、既定では降順（大きい順）に並ぶ。"
+      answer: true
+    - text: "`top 5 by duration` は、`order by duration desc | take 5` と同じ結果になる。"
+      answer: true
+    - text: "`take 5` は、最新の 5 件を返す。"
+      answer: false
+  explanation: |
+    KQL の `order by`（`sort by`）の既定は**降順**です（SQL とは逆）。昇順にしたいときは `asc` を指定します。`take` は並べ替えをせず任意の行を返すだけなので、「最新」や「最大」の行が欲しいときは `top` や `order by` と組み合わせます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/sort-operator
+    - https://learn.microsoft.com/kusto/query/take-operator
+
+- id: m-kql-parse-operator
+  objective: "4.4"
+  type: dropdown
+  difficulty: 3
+  tags: [kql, parse]
+  question: |
+    ワーカーのログ `Embedded doc=a1b2 chunks=34 in 1250ms` から、文書 ID・チャンク数・処理時間を列に取り出し、文書ごとの平均処理時間を出すクエリを完成させてください。
+  language: kql
+  template: |
+    traces
+    | where message startswith "Embedded doc="
+    | {{1}} message with "Embedded doc=" docId " chunks=" chunks:int " in " ms:{{2}} "ms"
+    | summarize avg_ms = {{3}}(ms) by docId
+  blanks:
+    "1":
+      options: ["parse", "extract", "split", "project"]
+      answer: "parse"
+    "2":
+      options: ["long", "string", "datetime", "dynamic"]
+      answer: "long"
+    "3":
+      options: ["avg", "sum", "dcount", "make_set"]
+      answer: "avg"
+  explanation: |
+    `parse` 演算子は、固定の文字列と取り出す列の並びでメッセージを分解し、`列名:型` で型も指定できます。形式が決まったログから複数の値を一度に取り出すのに向いています（1 つの値だけなら `extract` も使えます）。数値として取り出せば、そのまま平均などを計算できます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/parse-operator
+
+- id: m-kql-problem-id
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, exceptions, problem-id]
+  question: |
+    例外のメッセージには文書 ID などの値が含まれているため、`summarize count() by outerMessage` で集計すると種類が細かく分かれすぎてしまいます。「同じ原因の例外」ごとに件数をまとめたい場合、最も適切な列はどれですか。
+  options:
+    - "`problemId`（例外の種類と発生した場所から Application Insights が生成する識別子）"
+    - "`operation_Id`"
+    - "`itemId`"
+    - "`timestamp`"
+  answer: A
+  explanation: |
+    `exceptions` テーブルの `problemId` は、例外の種類とスタック上の発生場所をもとにした識別子で、メッセージの値が違っても同じ原因の例外をまとめて数えられます。ポータルの「失敗」画面でも、この単位で例外がグループ化されます。`operation_Id` はトレース（要求）ごとの ID です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/reference/tables/appexceptions
+
+- id: m-kql-render-match
+  objective: "4.4"
+  type: match
+  difficulty: 2
+  tags: [kql, render, visualization]
+  question: |
+    見せたい内容と、`render` で使うグラフの種類を対応付けてください。
+  pairs:
+    - left: "5 分ごとの p95 応答時間の推移"
+      right: "timechart"
+    - left: "例外の種類ごとの件数の比較（上位 10 種類）"
+      right: "barchart"
+    - left: "リージョンごとの要求数の構成比"
+      right: "piechart"
+  distractors:
+    - "scatterchart のみ"
+  explanation: |
+    時間の推移は `timechart`（`bin` や `make-series` で時間を集計した結果）、カテゴリの比較は `barchart` / `columnchart`、全体に対する割合は `piechart` が適しています。ブックやダッシュボードでも同じ考え方で表示を選びます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/render-operator
+
+- id: m-kql-multi-series
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, timechart, series]
+  question: |
+    3 つのコンテナー アプリの 5 分ごとの要求数を、1 つの時系列グラフに 3 本の線として表示したいです。最も適切なクエリはどれですか。
+  options:
+    - "`requests | where timestamp > ago(1d) | summarize n = count() by bin(timestamp, 5m), cloud_RoleName | render timechart`"
+    - "`requests | summarize n = count() by cloud_RoleName | render timechart`"
+    - "`requests | summarize n = count() by bin(timestamp, 5m) | render timechart`"
+    - "`requests | take 1000 | render timechart`"
+  answer: A
+  explanation: |
+    `summarize ... by bin(timestamp, 5m), cloud_RoleName` のように、時間の列に加えて系列を分ける列でも集計すると、`render timechart` が系列ごとに線を描きます。時間で集計しないと時系列にならず、系列の列がないと 1 本の線になります。
+  refs:
+    - https://learn.microsoft.com/kusto/query/render-operator
+    - https://learn.microsoft.com/kusto/query/bin-function
+
+- id: m-kql-top-nested
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, top-nested]
+  question: |
+    各コンテナー アプリ（`cloud_RoleName`）について、平均応答時間が最も遅い操作（`name`）を上位 3 つずつ表示したいです。最も適切な演算子はどれですか。
+  options:
+    - "`top-nested`（例: `top-nested of cloud_RoleName by count(), top-nested 3 of name by avg(duration)`）"
+    - "`top 3 by avg(duration)`"
+    - "`take 3`"
+    - "`distinct cloud_RoleName, name`"
+  answer: A
+  explanation: |
+    `top-nested` は階層的な上位 N 件を求める演算子で、「グループごとの上位 N 件」を 1 つのクエリで求められます。`top 3` は全体で 3 件しか返しません。同じことは `summarize` の後に `partition` や行番号（`row_number()`）を使っても実現できます。
+  refs:
+    - https://learn.microsoft.com/kusto/query/top-nested-operator
+
+- id: m-kql-search-cost
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, search, performance]
+  question: |
+    障害調査で、文書 ID `d-7781` に関するログをすべて探すため、`search "d-7781"` を直近 30 日で実行したところ、非常に遅く、タイムアウトしました。より効率的な書き方はどれですか。
+  options:
+    - "対象のテーブル（`traces`、`exceptions` など）と時間範囲を絞り、`where message has \"d-7781\"` のように列を指定して検索する"
+    - "`search \"*d-7781*\"` とワイルドカードを付ける"
+    - "時間範囲を 90 日に広げる"
+    - "`search` を 2 回続けて実行する"
+  answer: A
+  explanation: |
+    `search` はすべてのテーブルのすべての列を走査するので、範囲が広いと非常に重くなります。対象のテーブル・時間範囲・列を絞り、トークン単位で索引を使える `has` を使うと効率的です。普段から文書 ID などを構造化された属性として記録しておくと、さらに検索しやすくなります。
+  refs:
+    - https://learn.microsoft.com/kusto/query/search-operator
+    - https://learn.microsoft.com/kusto/query/best-practices
