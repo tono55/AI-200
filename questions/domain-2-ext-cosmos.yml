@@ -1,0 +1,521 @@
+# 分野 2 追加問題: Cosmos DB for NoSQL（2.1〜2.4）
+
+# ---------- 2.1 ----------
+- id: d-cosmos-hierarchical-pk
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, partition-key]
+  question: |
+    マルチテナントの RAG 用コンテナーで、パーティション キーを `/tenantId` にしています。ほとんどのクエリはテナントで絞り込みますが、最大手のテナント 1 社のデータが 20 GB に近づき、さらに増える見込みです。クエリの効率を保ったまま、この問題を解決する最も適切な方法はどれですか。
+  options:
+    - "階層型パーティション キー（例: `/tenantId` → `/documentId`）のコンテナーに移行する"
+    - "パーティション キーを `/id` に変更する（既存コンテナーのまま変更できる）"
+    - "スループットを 10 倍にする"
+    - "整合性レベルを Eventual にする"
+  answer: A
+  explanation: |
+    論理パーティション（同じキー値のアイテムの集まり）は **20 GB** が上限です。**階層型パーティション キー**を使うと、上位キー（テナント）が 20 GB を超えても下位キーで分散でき、テナント単位のクエリも効率的に保てます。
+    パーティション キーは作成後に変更できないため、新しいコンテナーへの移行が必要です。`/id` にするとテナント単位のクエリがクロスパーティションになります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/hierarchical-partition-keys
+    - https://learn.microsoft.com/azure/cosmos-db/partitioning-overview
+
+- id: d-cosmos-hot-partition
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, partition-key, throttling]
+  question: |
+    コンテナー全体のプロビジョニング スループットは 10,000 RU/s で、全体の使用率は 30% 程度です。それでも書き込みの一部が 429（Too Many Requests）になります。メトリックを見ると、特定のパーティション キー値（`status = "new"`）に書き込みが集中しています。根本的な原因と対策はどれですか。
+  options:
+    - "ホット パーティション。書き込みが分散するカーディナリティの高いパーティション キー（例: ドキュメント ID やテナント ID）で設計し直す"
+    - "スループットが不足している。50,000 RU/s に増やせば必ず解決する"
+    - "SDK が再試行しないことが原因。再試行を無効にする"
+    - "整合性レベルが原因。Strong にする"
+  answer: A
+  explanation: |
+    スループットは物理パーティションに分配されるため、1 つのパーティション キー値に負荷が集中すると、全体に余裕があってもその部分だけ 429 になります。`status` のように値の種類が少なく偏るプロパティはパーティション キーに不向きです。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/partitioning-overview
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/troubleshoot-request-rate-too-large
+
+- id: d-cosmos-paging-continuation
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, query, paging]
+  question: |
+    検索結果一覧 API で `OFFSET @skip LIMIT 20` を使ってページングしています。後ろのページになるほど遅くなり、RU も増えます。最も適切な改善策はどれですか。
+  options:
+    - "SDK のページ（`max_item_count`）と**継続トークン**を使い、前回の続きから取得する"
+    - "`OFFSET` の値を大きくする"
+    - "整合性レベルを Strong にする"
+    - "クエリを `SELECT *` に変える"
+  answer: A
+  explanation: |
+    `OFFSET LIMIT` は読み飛ばす件数分も処理するため、オフセットが大きいほど RU と遅延が増えます。**継続トークン**を使うと、前のページの続きから効率的に取得できます。
+  refs:
+    - https://learn.microsoft.com/cosmos-db/query/offset-limit
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/query/pagination
+
+- id: d-cosmos-patch
+  objective: "2.1"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, sdk, patch]
+  question: |
+    回答ごとに、ドキュメントの `useCount` を 1 増やしています。現在は「読み取り → 値を増やす → upsert」をしており、同時アクセス時に更新が失われることがあります。アイテム全体を送らずに、安全に加算する方法はどれですか。
+  options:
+    - "部分ドキュメント更新（patch）の `incr` 操作で `/useCount` に 1 を加える"
+    - "整合性レベルを Eventual にする"
+    - "upsert の前に 1 秒待つ"
+    - "`useCount` を別のコンテナーに移す"
+  answer: A
+  explanation: |
+    **patch**（部分ドキュメント更新）はサーバー側で `add`、`set`、`replace`、`remove`、`incr` などの操作を適用するため、読み取り → 書き込みの間に他の更新が入って失われる問題を避けられ、送信データも小さくなります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/partial-document-update
+
+- id: d-cosmos-etag
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, concurrency, etag]
+  question: |
+    管理画面で 2 人の管理者が同じ文書のメタデータを編集します。後から保存した人が、先に保存した人の変更を気付かずに上書きしてしまう問題を防ぎたいです。Cosmos DB で最も適切な方法はどれですか。
+  options:
+    - "読み取ったアイテムの `_etag` を `If-Match` 条件にして置換し、412（Precondition Failed）なら最新を読み直して利用者に知らせる（楽観的同時実行制御）"
+    - "整合性レベルを Strong にする"
+    - "すべての書き込みを upsert にする"
+    - "コンテナーのスループットを上げる"
+  answer: A
+  explanation: |
+    `_etag` はアイテムが更新されるたびに変わります。置換時に `If-Match` で読み取ったときの ETag を指定すると、その間に他の更新があれば **412** で失敗するため、上書きを防げます。整合性レベルは読み取りの鮮度の話で、上書きの競合は防げません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/database-transactions-optimistic-concurrency
+
+- id: d-cosmos-transactional-batch
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, transactional-batch, partition-key]
+  question: |
+    1 つの文書を登録するときに、親アイテム（文書情報）と 30 個のチャンク アイテムを**すべて成功するか、すべて失敗するか**のどちらかにしたいと考えています。Cosmos DB で実現するための前提と方法はどれですか。
+  options:
+    - "親とチャンクを同じパーティション キー値（例: `/documentId`）にし、トランザクション バッチでまとめて書き込む"
+    - "パーティション キーを `/id` にして、別々のパーティションにトランザクション バッチで書き込む"
+    - "整合性レベルを Strong にすれば、複数の upsert が自動で原子的になる"
+    - "変更フィードで後から整合性を保証する"
+  answer: A
+  explanation: |
+    **トランザクション バッチ**は、**同じ論理パーティション（同じパーティション キー値）**内の複数の操作を原子的に実行します（1 バッチ最大 100 操作）。パーティションをまたぐトランザクションはできないため、一緒に更新するデータは同じパーティション キー値になるように設計します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/transactional-batch
+
+- id: d-cosmos-preferred-regions
+  objective: "2.1"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, sdk, multi-region]
+  question: |
+    Cosmos DB アカウントは East US（書き込み）と Japan East（読み取りレプリカ）にあります。Japan East の Container Apps から読み取ると遅延が大きいです。クライアント側で設定すべきものはどれですか。
+  options:
+    - "`CosmosClient` の優先リージョン（`preferred_locations` / `ApplicationPreferredRegions`）に Japan East を先頭で指定する"
+    - "整合性レベルを Strong にする"
+    - "パーティション キーを変える"
+    - "Gateway モードにする"
+  answer: A
+  explanation: |
+    SDK は優先リージョンの順に読み取り先を選びます。指定しないと書き込みリージョンから読むことがあり、遅延が大きくなります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/tutorial-global-distribution
+
+- id: d-cosmos-sdk-facts
+  objective: "2.1"
+  type: yesno
+  difficulty: 2
+  tags: [cosmos-db, sdk]
+  question: |
+    Cosmos DB for NoSQL の SDK とクエリについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "SDK は 429 を受け取ると、レスポンスの再試行待ち時間に従って自動で再試行する。"
+      answer: true
+    - text: "クエリの `JOIN` は、異なるアイテムどうしを結合する（リレーショナル DB の JOIN と同じ）。"
+      answer: false
+    - text: "各操作の消費 RU は、レスポンス ヘッダー `x-ms-request-charge` で確認できる。"
+      answer: true
+    - text: "1 つのアイテムの最大サイズは 2 MB である。"
+      answer: true
+  explanation: |
+    Cosmos DB の `JOIN` は**同じアイテム内の配列**を展開する自己結合で、別のアイテムとは結合しません。関連データは同じアイテムに埋め込むか、アプリ側で複数のクエリを組み合わせます。
+  refs:
+    - https://learn.microsoft.com/cosmos-db/query/join
+    - https://learn.microsoft.com/azure/cosmos-db/concepts-limits
+
+# ---------- 2.2 ----------
+- id: d-cosmos-filter-orderby-composite
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, indexing, composite-index]
+  question: |
+    次のクエリの RU が高く、インデックス メトリックで「複合インデックスの候補」が示されています。最も効果的な複合インデックスはどれですか。
+
+    ```sql
+    SELECT * FROM c WHERE c.category = @cat ORDER BY c.updatedAt DESC
+    ```
+  options:
+    - "`(category ASC, updatedAt DESC)`"
+    - "`(updatedAt DESC, category ASC)`"
+    - "`(category ASC)` の範囲インデックスだけ"
+    - "空間インデックス"
+  answer: A
+  explanation: |
+    等価フィルターと `ORDER BY` を組み合わせるクエリでは、**フィルターのプロパティを先に、並べ替えのプロパティを後に**した複合インデックスが有効です。順序（DESC）も `ORDER BY` と合わせます。
+    インデックス メトリック（SDK でインデックス メトリックを有効にする）で、使われたインデックスと推奨インデックスを確認できます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/index-policy
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/index-metrics
+
+- id: d-cosmos-index-none
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, indexing]
+  question: |
+    会話セッションの状態を保存するコンテナーがあります。アクセスは常に `id` とパーティション キーによるポイント読み取りと upsert だけで、クエリは一切使いません。書き込みの RU を最小にするインデックス作成ポリシーはどれですか。
+  options:
+    - "`indexingMode: none`（インデックスを作成しない）"
+    - "既定（`/*` をすべてインデックス）"
+    - "すべてのプロパティの複合インデックスを追加する"
+    - "ベクトル インデックスを追加する"
+  answer: A
+  explanation: |
+    ポイント読み取りはインデックスを使わないため、クエリを使わないキー バリュー用途なら `indexingMode: none` で書き込み時のインデックス更新コストをなくせます。一部のプロパティだけで検索するなら、`excludedPaths: /*` にして必要なパスだけ `includedPaths` に入れる方法もあります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/index-policy
+
+- id: d-cosmos-session-token
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, consistency, session]
+  question: |
+    整合性レベルは Session です。API は 3 インスタンスでロード バランスされています。ユーザーがインスタンス A でメッセージを書き込んだ直後に、インスタンス B で一覧を読むと、書いたメッセージが表示されないことがあります。最もコストを抑えた対処はどれですか。
+  options:
+    - "書き込みの応答のセッション トークンをクライアントに返し、次の読み取りでそのトークンを指定する（またはセッションを同じインスタンスに固定する）"
+    - "アカウントの整合性レベルを Strong に変える"
+    - "読み取りのたびに 1 秒待つ"
+    - "パーティション キーを `/id` に変える"
+  answer: A
+  explanation: |
+    Session 整合性の read-your-writes は**セッション トークン**単位で保証されます。別の `CosmosClient`（別インスタンス）はトークンを知らないため、古いレプリカから読むことがあります。トークンを引き継げば、Strong（読み取り RU 2 倍、可用性・遅延の制約）にしなくても解決できます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/consistency-levels
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/how-to-manage-consistency
+
+- id: d-cosmos-ttl
+  objective: "2.2"
+  type: yesno
+  difficulty: 2
+  tags: [cosmos-db, ttl]
+  question: |
+    チャット履歴のコンテナーで、アイテムを 30 日後に自動で削除したいと考えています。Cosmos DB の有効期限（TTL）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "コンテナーの既定の TTL を 2592000（秒）にすると、各アイテムは最終更新から 30 日後に削除される。"
+      answer: true
+    - text: "コンテナーの既定の TTL を -1 にすると、TTL は有効だが、アイテムに `ttl` を設定しない限り削除されない。"
+      answer: true
+    - text: "コンテナーで TTL を有効にしていなくても、アイテムに `ttl` プロパティを付ければ削除される。"
+      answer: false
+    - text: "TTL による削除は、プロビジョニングされた RU の余裕を使ってバックグラウンドで行われる。"
+      answer: true
+  explanation: |
+    TTL はコンテナーで有効にする必要があります（既定 TTL を秒数か -1 に設定）。アイテムの `ttl` はコンテナーの設定を上書きします。期限切れの削除は余った RU を使ってバックグラウンドで行われ、期限切れのアイテムはクエリ結果に返されません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/time-to-live
+
+- id: d-cosmos-multiwrite-strong
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, consistency, multi-region]
+  question: |
+    グローバルなアプリで、複数のリージョンへの書き込み（マルチリージョン書き込み）を有効にしています。業務部門から「常に最新の値を読みたいので Strong にしてほしい」と言われました。正しい説明はどれですか。
+  options:
+    - "マルチリージョン書き込みのアカウントでは Strong は使えない。遅れの上限が許容できるなら Bounded staleness、または Session とアプリ側の工夫を検討する"
+    - "Strong にすれば、読み取りの RU は変わらず常に最新になる"
+    - "Strong はリクエスト単位で指定すれば使える"
+    - "Eventual にすれば常に最新になる"
+  answer: A
+  explanation: |
+    Strong はマルチリージョン書き込みと組み合わせられません。またリクエスト単位では既定より強いレベルにはできません。要件を「どこまでの遅れなら許容できるか」に分解して選びます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/consistency-levels
+
+- id: d-cosmos-ru-factors
+  objective: "2.2"
+  type: multiple
+  difficulty: 2
+  tags: [cosmos-db, ru]
+  question: |
+    書き込み 1 回あたりの RU を**下げる**のに効果がある変更を **2 つ**選んでください。
+  options:
+    - "クエリで使わない大きなプロパティ（本文や埋め込み）をインデックスから除外する"
+    - "アイテムから不要なプロパティを削り、サイズを小さくする"
+    - "整合性レベルを Strong にする"
+    - "複合インデックスを大量に追加する"
+    - "パーティション キーを `status` に変える"
+  answer: [A, B]
+  explanation: |
+    書き込みの RU は、アイテムのサイズと、更新が必要なインデックスの量で増えます。インデックス対象を減らす、アイテムを小さくすることが有効です。複合インデックスを増やすと書き込みのコストは増えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/request-units
+    - https://learn.microsoft.com/azure/cosmos-db/index-policy
+
+# ---------- 2.3 ----------
+- id: d-cosmos-model-change
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, vector, embeddings]
+  question: |
+    埋め込みモデルを `text-embedding-3-small`（1536 次元）から `text-embedding-3-large`（3072 次元）に変更することになりました。既存のコンテナーには `/embedding`（1536 次元、diskANN）のポリシーがあります。正しい進め方はどれですか。
+  options:
+    - "新しいベクトル パス（例: `/embedding_v2`、3072 次元）のポリシーとインデックスを追加し（または新しいコンテナーを用意し）、全文書を新モデルで再埋め込みしてから、クエリを新しいパスに切り替える"
+    - "既存の 1536 次元のベクトルと、新しい 3072 次元の質問ベクトルをそのまま比較する"
+    - "既存ポリシーの `dimensions` を 3072 に書き換えるだけでよい"
+    - "既存の埋め込みの後ろを 0 で埋めて 3072 次元にする"
+  answer: A
+  explanation: |
+    異なるモデルの埋め込みは同じベクトル空間にないため、混ぜて比較できません。質問と文書は同じモデルで埋め込む必要があります。
+    ベクトル ポリシーの設定は直接変更できないので、新しいパスを追加する（パスの追加・削除は可能）か、新しいコンテナーに移行し、再埋め込みが終わってから切り替えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-hybrid
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, hybrid-search, full-text]
+  question: |
+    製品マニュアルの RAG で、「型番 `XJ-9000` のリセット方法」のように**型番の完全一致**と**意味の近さ**の両方が重要な質問がよく来ます。ベクトル検索だけでは型番の違う製品の文書が上位に来ることがあります。Cosmos DB でどう改善しますか。
+  options:
+    - "フルテキスト ポリシーとフルテキスト インデックスを定義し、`ORDER BY RANK RRF(VectorDistance(...), FullTextScore(...))` のハイブリッド検索にする"
+    - "ベクトル インデックスを flat に変える"
+    - "埋め込みの次元数を増やす"
+    - "整合性レベルを Strong にする"
+  answer: A
+  explanation: |
+    ハイブリッド検索は、ベクトルの類似度とキーワード（BM25）のスコアを **RRF（Reciprocal Rank Fusion）** で統合します。型番や固有名詞のような正確な一致が重要な語に強くなります。`RRF` には重みも指定できます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/hybrid-search
+
+- id: d-cosmos-tenant-quantized
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, vector, multi-tenant]
+  question: |
+    全体で 2,000 万チャンクありますが、すべてのクエリはテナント（パーティション キー）で絞り込まれ、1 テナントあたりのチャンク数は最大でも 1 万程度です。検索結果はできるだけ正確（総当たりに近い）にしたいと考えています。ベクトル インデックスとして最も適したものはどれですか（1536 次元）。
+  options:
+    - "`quantizedFlat`"
+    - "`flat`"
+    - "ベクトル インデックスは不要"
+    - "全体が 2,000 万件なので必ず `diskANN`"
+  answer: A
+  explanation: |
+    インデックスの選択は、**1 回の検索の対象になるベクトル数**で考えます。フィルターやパーティション キーで対象が約 5 万件以下に絞られるなら、`quantizedFlat`（総当たり、量子化）が低 RU で高い精度を出せます。`flat` は 505 次元までなので 1536 次元には使えません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/vector-search-performance-tips
+
+- id: d-cosmos-recall-tuning
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, vector, diskann, recall]
+  question: |
+    diskANN インデックスで検索しています。評価データで確認すると、総当たりの結果と比べて関連文書の取りこぼし（リコールの低下）が目立ちます。RU や遅延が多少増えてもよいので、クエリ単位でリコールを上げたいです。どうしますか。
+  options:
+    - "`VectorDistance` のオプションで `searchListSizeMultiplier` を大きくする"
+    - "`TOP` を外す"
+    - "インデックスを flat に変える（1536 次元のまま）"
+    - "整合性レベルを Eventual にする"
+  answer: A
+  explanation: |
+    diskANN は近似検索で、`searchListSizeMultiplier` を大きくすると探索する候補が増え、リコールが上がる代わりに遅延と RU が増えます。`flat` は 505 次元までしか使えません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+    - https://learn.microsoft.com/cosmos-db/query/vectordistance
+
+- id: d-cosmos-embedding-responsibility
+  objective: "2.3"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, vector, embeddings]
+  question: |
+    Cosmos DB for NoSQL でベクトル検索を使う RAG を実装します。役割分担の説明として正しいものはどれですか。
+  options:
+    - "埋め込みはアプリ（Azure OpenAI などの埋め込みモデル）で生成し、Cosmos DB は埋め込みの保存・インデックス・類似検索を担う。質問も同じモデルで埋め込んでからクエリする"
+    - "Cosmos DB にテキストを保存すると、自動で埋め込みが生成される"
+    - "`VectorDistance` に質問の文字列を渡すと、Cosmos DB が埋め込みを生成して比較する"
+    - "埋め込みは Cosmos DB のストアド プロシージャで生成する"
+  answer: A
+  explanation: |
+    Cosmos DB はベクトルを**格納・索引・検索**するデータベースで、埋め込みの生成は埋め込みモデル側で行います。文書と質問は同じモデル・同じ次元で埋め込む必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/rag
+
+- id: d-cosmos-chunking-size
+  objective: "2.3"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, vector, chunking]
+  question: |
+    300 ページの PDF を 1 つのアイテムとして、本文全体と各ページの埋め込みの配列を入れて保存しようとしたところ、書き込みが失敗しました。最も適切な設計はどれですか。
+  options:
+    - "文書をチャンクに分割し、チャンクごとに本文・埋め込み・メタデータを持つアイテムとして保存する（同じ文書のチャンクは同じパーティション キー値にするなど）"
+    - "スループットを上げて再試行する"
+    - "整合性レベルを Strong にする"
+    - "埋め込みを文字列に変換して保存する"
+  answer: A
+  explanation: |
+    Cosmos DB のアイテムの最大サイズは **2 MB** です。RAG では文書をチャンクに分けて 1 チャンク = 1 アイテムにすると、サイズ制限を避けられ、検索結果も必要な部分だけ返せます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/concepts-limits
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/rag
+
+- id: d-cosmos-score-direction
+  objective: "2.3"
+  type: yesno
+  difficulty: 3
+  tags: [cosmos-db, vector, distance]
+  question: |
+    `VectorDistance` のスコアについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "距離関数が cosine の場合、スコアは -1〜1 で、大きいほど似ている。"
+      answer: true
+    - text: "距離関数が euclidean の場合、スコアが 0 に近いほど似ている。"
+      answer: true
+    - text: "euclidean のときに似ている順に並べるには、`ORDER BY VectorDistance(...) DESC` と明示する必要がある。"
+      answer: false
+    - text: "しきい値でフィルターするときは、距離関数によって「大きいほど良い」か「小さいほど良い」かが逆になる点に注意する。"
+      answer: true
+  explanation: |
+    `ORDER BY VectorDistance(...)` は、距離関数に応じて**自動的に似ている順**に並びます（ASC / DESC を付けない）。一方、`WHERE` でスコアのしきい値を書く場合は、cosine / dotproduct は「大きいほど似ている」、euclidean は「小さいほど似ている」ことを考慮します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+    - https://learn.microsoft.com/cosmos-db/query/vectordistance
+
+# ---------- 2.4 ----------
+- id: d-cosmos-cf-starttime
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, lease]
+  question: |
+    変更フィード プロセッサ `embedding-refresh` を 1 か月運用してきました。既存の全アイテムの埋め込みを作り直すため、開始位置を「最初から」に変更して再デプロイしましたが、古いアイテムが処理されません。原因と対処はどれですか。
+  options:
+    - "開始位置の設定は、リースがまだ存在しないときにだけ使われる。既存のリースから続きを読んでいるため、新しいプロセッサ名（または新しいリース コンテナー）で最初から読むプロセッサを動かす"
+    - "変更フィードは過去の変更を保持しないため、再処理は不可能"
+    - "整合性レベルを Strong にすれば、最初から読み直される"
+    - "コンテナーのスループットを上げれば最初から読み直される"
+  answer: A
+  explanation: |
+    変更フィード プロセッサは進捗を**リース**に保存し、リースがあればその続きから読みます。開始時刻や「最初から」の指定は、リースを初めて作るときだけ有効です。最新バージョン モードでは、各アイテムの最新の状態は最初から読めます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-two-consumers
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed]
+  question: |
+    同じコンテナーの変更を、「埋め込みの再計算」と「監査ログの記録」の 2 つの独立した処理で**それぞれすべて**受け取りたいと考えています。同じリース コンテナーを使う場合の正しい構成はどれですか。
+  options:
+    - "2 つの処理に**別々のプロセッサ名**を付ける（Functions のトリガーなら `LeaseContainerPrefix` を分ける）"
+    - "同じプロセッサ名で 2 つを動かす"
+    - "2 つの処理を同じデリゲートに入れる以外に方法はない"
+    - "変更フィードは 1 つのコンテナーに 1 つの消費者しか持てない"
+  answer: A
+  explanation: |
+    同じプロセッサ名（同じリース）で動かすと、変更は**分担**されて片方にしか届きません（スケール アウトの動作）。独立した処理にはプロセッサ名やリース コンテナーのプレフィックスを分け、それぞれが全変更を受け取るようにします。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-trigger
+
+- id: d-cosmos-cf-estimator
+  objective: "2.4"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, change-feed, monitoring]
+  question: |
+    変更フィード プロセッサの処理が、書き込みにどれくらい遅れているか（未処理の変更の量）を監視し、増えたらインスタンスを追加したいと考えています。何を使いますか。
+  options:
+    - "変更フィード推定ツール（change feed estimator）で、リースごとの推定ラグを取得する"
+    - "`x-ms-request-charge` ヘッダー"
+    - "整合性レベルのメトリック"
+    - "インデックス メトリック"
+  answer: A
+  explanation: |
+    **変更フィード推定ツール**は、各リース（パーティション範囲）で未処理の変更がどれだけあるかを推定します。この値をメトリックとして監視し、スケールの判断に使えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/how-to-use-change-feed-estimator
+
+- id: d-cosmos-cf-poison
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, error-handling]
+  question: |
+    変更フィード プロセッサのデリゲートで、ある 1 件のアイテムの処理（埋め込み生成）が毎回例外になります。デリゲートが例外を投げると、同じバッチが再配信され続け、そのリースの処理が進みません。最も適切な実装はどれですか。
+  options:
+    - "アイテム単位で例外を捕捉し、失敗したアイテムを別のストア（キューやコンテナー）に記録して後で再処理し、バッチの処理は完了させる"
+    - "例外をそのまま投げ続け、いつか成功するのを待つ"
+    - "リース コンテナーを毎回削除する"
+    - "変更フィードを使うのをやめる"
+  answer: A
+  explanation: |
+    デリゲートが例外で終わると、そのバッチはチェックポイントされずに再配信されます（少なくとも 1 回）。恒常的に失敗するアイテムで止まらないように、アイテム単位でエラーを処理し、配信不能キューのような仕組みで隔離します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-lease-pk
+  objective: "2.4"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, change-feed, lease]
+  question: |
+    変更フィード プロセッサ用のリース コンテナーを作成します。パーティション キーとして正しいものはどれですか。
+  options:
+    - "`/id`"
+    - "監視対象コンテナーと同じパーティション キー"
+    - "`/_ts`"
+    - "パーティション キーなし"
+  answer: A
+  explanation: |
+    リース コンテナーはパーティション キーを **`/id`** にします。監視対象のコンテナーのパーティション キーとは無関係です。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-all-versions
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, modes]
+  question: |
+    監査要件で、アイテムの**中間の更新も含めたすべての変更と削除**を記録する必要があります。現在は最新バージョン モードの変更フィードを使っており、短時間に複数回更新されたアイテムは最後の状態しか届きません。どうすべきですか。
+  options:
+    - "全バージョンと削除モードの変更フィードを使う（アカウントで継続的バックアップが必要）"
+    - "プロセッサのインスタンスを増やせば中間の更新も届く"
+    - "整合性レベルを Strong にする"
+    - "TTL を短くする"
+  answer: A
+  explanation: |
+    最新バージョン モードは各アイテムの最新の状態を届けるため、中間の更新は省略されることがあり、削除も届きません。**全バージョンと削除モード**はすべての変更と削除を記録しますが、継続的バックアップが前提で、保持期間内の変更しか読めません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/change-feed-modes
