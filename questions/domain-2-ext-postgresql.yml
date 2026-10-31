@@ -1,0 +1,637 @@
+# 分野 2 追加問題: Azure Database for PostgreSQL（2.5〜2.10）
+
+# ---------- 2.5 ----------
+- id: d-pg-token-per-connection
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, entra-id, token]
+  question: |
+    アプリは起動時に一度だけ `DefaultAzureCredential().get_token(...)` でトークンを取得し、そのトークンをパスワードとして接続プールを作っています。起動から 1〜2 時間経つと、プールが**新しい接続を作るとき**だけ認証エラーになります。正しい修正はどれですか。
+  options:
+    - "接続を作るたびに（プールの接続ファクトリーで）トークンを取得し直す。Azure Identity のライブラリはトークンをキャッシュし、期限前に更新する"
+    - "トークンの有効期限を 1 年に延ばす設定をする"
+    - "接続プールを使わず、リクエストごとに同じトークンで接続する"
+    - "Entra 認証をやめ、パスワードを環境変数に置く"
+  answer: A
+  explanation: |
+    Entra のアクセス トークンは約 1 時間で期限が切れます。トークンは**接続を確立するとき**に検証されるため、既存の接続は動き続けても、期限切れのトークンで新しい接続は作れません。接続ごとに有効なトークンを取得するようにします。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/security/security-entra-concepts
+    - https://learn.microsoft.com/azure/postgresql/security/security-connect-with-managed-identity
+
+- id: d-pg-create-principal
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, entra-id, managed-identity]
+  question: |
+    Container Apps のマネージド ID（名前 `rag-api-id`）で PostgreSQL フレキシブル サーバーに接続しようとすると、`role "rag-api-id" does not exist` で失敗します。サーバーでは Microsoft Entra 認証を有効にし、自分を Entra 管理者に設定済みです。次に行うべきことはどれですか。
+  options:
+    - "Entra 管理者として `postgres` データベースに接続し、`pgaadauth_create_principal('rag-api-id', false, false)` などでマネージド ID のロールを作成し、必要な権限（GRANT）を付与する"
+    - "マネージド ID に Azure の Contributor ロールを付与する"
+    - "パスワード認証を有効にして `rag-api-id` というユーザーを作る"
+    - "`azure.extensions` に `AAD` を追加する"
+  answer: A
+  explanation: |
+    Entra 認証を有効にしても、データベース側に**その ID に対応するロール**が必要です。Entra 管理者で接続し、マネージド ID などのプリンシパルのロールを作成してから、スキーマやテーブルへの権限を付与します。Azure RBAC のロールはデータベース内の権限とは別物です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/security/security-manage-entra-users
+
+- id: d-pg-bulk-insert
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, python, performance]
+  question: |
+    10 万チャンクの埋め込みを PostgreSQL に初期投入しています。Python から 1 行ずつ `INSERT` と `commit` を繰り返しているため、数時間かかります。最も効果的な改善はどれですか。
+  options:
+    - "`COPY`（psycopg の `cursor.copy()`）や複数行の一括挿入でまとめて送り、まとめてコミットする。ベクトル インデックスは投入後に作成する"
+    - "行ごとに新しい接続を作る"
+    - "`hnsw.ef_search` を大きくする"
+    - "整合性レベルを下げる"
+  answer: A
+  explanation: |
+    行ごとの往復とコミットのオーバーヘッドが支配的です。`COPY` や一括挿入で往復を減らします。大量投入では、先にインデックスを作ると挿入のたびに更新が走るため、**投入後にインデックスを作る**方が速いことが多いです（`maintenance_work_mem` も調整）。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://www.psycopg.org/psycopg3/docs/basic/copy.html
+
+- id: d-pg-network-access
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, network]
+  question: |
+    パブリック アクセスの PostgreSQL フレキシブル サーバーに、Azure 上の Container Apps から接続するとタイムアウトします。ローカル PC（ファイアウォール規則で許可済み）からは接続できます。最も可能性の高い原因はどれですか。
+  options:
+    - "サーバーのファイアウォール規則が Container Apps の送信元 IP を許可していない（またはプライベート アクセスにすべき構成になっている）"
+    - "pgvector が有効になっていない"
+    - "HNSW インデックスがない"
+    - "PgBouncer が無効になっている"
+  answer: A
+  explanation: |
+    パブリック アクセスでは、許可した IP 範囲（または「Azure サービスからのアクセスを許可」）からしか接続できません。本番では VNet 統合（プライベート アクセス）やプライベート エンドポイントで閉じたネットワークから接続するのが一般的です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/overview
+
+- id: d-pg-register-vector
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, python, pgvector]
+  question: |
+    Python で numpy 配列の埋め込みをそのまま SQL のパラメーターに渡すと、`can't adapt type 'numpy.ndarray'` のようなエラーになります。psycopg 3 で最も適切な対処はどれですか。
+  options:
+    - "`pgvector.psycopg` の `register_vector(conn)` を接続ごと（プールなら `configure`）に呼び、`vector` 型と numpy 配列を相互変換できるようにする"
+    - "埋め込みを `str()` で文字列にして `text` 列に保存する"
+    - "`vector` 列を `float8[]` に変える"
+    - "埋め込みを JSON にして `jsonb` 列に保存する"
+  answer: A
+  explanation: |
+    pgvector の Python パッケージは、psycopg などのドライバーに `vector` 型のアダプターを登録します。接続ごとに登録が必要なので、接続プールでは接続作成時のフック（`configure`）で呼びます。
+  refs:
+    - https://github.com/pgvector/pgvector-python
+
+# ---------- 2.6 ----------
+- id: d-pg-denormalize-filter
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, schema, filter]
+  question: |
+    `documents`（tenant_id を持つ）と `chunks`（document_id と embedding を持つ）に分けたスキーマで、テナントで絞った類似検索を `JOIN documents ... WHERE d.tenant_id = $1 ORDER BY c.embedding <=> $2 LIMIT 5` で行っています。テナントのデータが多いほど遅くなり、部分インデックスも作れません。最も効果的なスキーマの変更はどれですか。
+  options:
+    - "`chunks` にも `tenant_id` を持たせ（非正規化）、検索を `chunks` だけで完結させる。必要ならテナントで部分インデックスやパーティショニングを使う"
+    - "`documents` に embedding を移す"
+    - "`chunks` の embedding を `text` 型にする"
+    - "外部キーを削除する"
+  answer: A
+  explanation: |
+    ベクトル検索のフィルターに使う列は、ベクトルと**同じテーブル**にある方が、反復インデックス スキャン、部分インデックス、パーティショニングなどの最適化を使えます。RAG ではホットパスのために一部の列を非正規化するのは一般的な設計です。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+- id: d-pg-partitioning
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, partitioning]
+  question: |
+    数千テナントのチャンク（合計数億行）を 1 つのテーブルに入れています。テナントごとの削除（解約）に時間がかかり、検索もテナントで絞り込むのに遅いです。PostgreSQL の機能で最も適切な設計はどれですか。
+  options:
+    - "宣言的パーティショニング（テナントの HASH / LIST など）でテーブルを分割し、パーティションごとにベクトル インデックスを持たせる。解約は該当パーティションの DETACH / DROP で行う"
+    - "テナントごとに別のサーバーを作る"
+    - "すべての列に B-tree インデックスを張る"
+    - "テーブルを `UNLOGGED` にする"
+  answer: A
+  explanation: |
+    パーティショニングすると、テナントで絞ったクエリは対象のパーティションだけを読み（パーティション プルーニング）、インデックスも小さくなります。大量削除も DROP / DETACH で一瞬です。テナント数が多い場合は HASH で分割数を抑えるなど設計を工夫します。
+  refs:
+    - https://www.postgresql.org/docs/current/ddl-partitioning.html
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-jsonb-gin
+  objective: "2.6"
+  type: dropdown
+  difficulty: 2
+  tags: [postgresql, jsonb, index]
+  question: |
+    文書のメタデータ（`jsonb`）で「言語が ja で、タグに faq を含む」ものを高速に絞り込みます。インデックスとクエリを完成させてください。
+  language: sql
+  template: |
+    CREATE INDEX ON documents USING {{1}} (metadata);
+
+    SELECT id, title
+    FROM documents
+    WHERE metadata {{2}} '{"lang": "ja", "tags": ["faq"]}';
+  blanks:
+    "1": {options: [gin, btree, hnsw], answer: gin}
+    "2": {options: ["@>", "->>", "<=>"], answer: "@>"}
+  explanation: |
+    `jsonb` の包含演算子 `@>`（左が右を含む）は **GIN** インデックスで高速化できます。`->>` は値を取り出す演算子、`<=>` は pgvector のコサイン距離です。
+    頻繁に絞り込む属性は、`jsonb` ではなく通常の列にして B-tree を張る方が速い場合もあります。
+  refs:
+    - https://www.postgresql.org/docs/current/datatype-json.html
+    - https://www.postgresql.org/docs/current/gin.html
+
+- id: d-pg-idempotent-upsert
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, schema, idempotency]
+  question: |
+    埋め込みの生成ジョブは Service Bus から少なくとも 1 回配信されるため、同じ文書のチャンクが重複して挿入されることがあります。スキーマ側で重複を防ぎ、再処理しても結果が同じになるようにするにはどうしますか。
+  options:
+    - "`chunks` に `(document_id, chunk_index)` の一意制約を付け、`INSERT ... ON CONFLICT (document_id, chunk_index) DO UPDATE` で書き込む"
+    - "`id` を `bigserial` にする"
+    - "ジョブの同時実行数を 1 にする"
+    - "挿入前に `SELECT COUNT(*)` で確認する"
+  answer: A
+  explanation: |
+    一意制約と `ON CONFLICT ... DO UPDATE`（アップサート）で、同じチャンクが何度処理されても 1 行に保てます（冪等）。事前の SELECT は同時実行時に競合して重複を防げません。
+  refs:
+    - https://www.postgresql.org/docs/current/sql-insert.html
+
+- id: d-pg-tsvector-generated
+  objective: "2.6"
+  type: single
+  difficulty: 2
+  tags: [postgresql, full-text]
+  question: |
+    ハイブリッド検索のために、チャンク本文の全文検索も行います。本文を更新するたびに検索用のデータも確実に更新されるようにしたいです。最も適切なスキーマはどれですか。
+  options:
+    - "`content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED` の生成列と GIN インデックス"
+    - "アプリで毎回 `to_tsvector` を計算して別テーブルに保存する"
+    - "本文に B-tree インデックスを張り、`LIKE '%語%'` で検索する"
+    - "本文を `jsonb` にする"
+  answer: A
+  explanation: |
+    生成列は元の列から自動で計算され、更新漏れが起きません。`tsvector` に GIN インデックスを張り、`@@` 演算子と `ts_rank` で検索・スコアリングします。`LIKE '%...%'` は B-tree を使えません。
+  refs:
+    - https://www.postgresql.org/docs/current/textsearch-tables.html
+
+- id: d-pg-cascade
+  objective: "2.6"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, schema]
+  question: |
+    `chunks.document_id` に `REFERENCES documents(id) ON DELETE CASCADE` を付けた設計について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "文書を削除すると、その文書のチャンク（と埋め込み）も自動で削除される。"
+      answer: true
+    - text: "存在しない document_id のチャンクを挿入しようとするとエラーになる。"
+      answer: true
+    - text: "外部キーがあると、ベクトル インデックスを作成できない。"
+      answer: false
+  explanation: |
+    外部キーは参照整合性を保ち、`ON DELETE CASCADE` で子の行も削除されます。外部キーとベクトル インデックスは無関係に併用できます（参照先の削除を速くするため、外部キー列には B-tree インデックスを張るのが一般的）。
+  refs:
+    - https://www.postgresql.org/docs/current/ddl-constraints.html
+
+# ---------- 2.7 ----------
+- id: d-pg-ivfflat-lists
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, ivfflat]
+  question: |
+    約 400 万行のテーブルに IVFFlat インデックスを作成します。pgvector の推奨に従うと、`lists` の初期値として最も適切なものはどれですか。
+  options:
+    - "約 2,000（行数の平方根）"
+    - "約 4,000（行数 ÷ 1000）"
+    - "1"
+    - "400 万（行数と同じ）"
+  answer: A
+  explanation: |
+    pgvector の目安は、100 万行までは `行数 / 1000`、それを超える場合は `sqrt(行数)` です。400 万行なら sqrt(4,000,000) = 2,000 です。検索時の `ivfflat.probes` は `sqrt(lists)`（約 45）から始めて調整します。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-ivfflat-rebuild
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, ivfflat]
+  question: |
+    半年前に作った IVFFlat インデックスで、最近追加された文書（以前と分野の違う内容が大半）の検索精度が下がってきました。パラメーターは変えていません。最も適切な対処はどれですか。
+  options:
+    - "現在のデータでインデックスを再作成する（`REINDEX` や作り直し。または HNSW への移行を検討）"
+    - "`hnsw.ef_search` を大きくする"
+    - "`maintenance_work_mem` を小さくする"
+    - "整合性レベルを変える"
+  answer: A
+  explanation: |
+    IVFFlat はインデックス作成時のデータでリスト（クラスターの中心）を決めるため、その後に分布の違うデータが増えると精度が下がります。再作成すると現在の分布でリストが作り直されます。HNSW は追加に強い構造です。`hnsw.ef_search` は IVFFlat には効きません。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-halfvec-expression
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, halfvec]
+  question: |
+    3072 次元の `vector` 列に、`CREATE INDEX ON items USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops);` で式インデックスを作りました。しかし `ORDER BY embedding <=> $1 LIMIT 5` のクエリでインデックスが使われません。どう直しますか。
+  options:
+    - "クエリでも同じ式を使う: `ORDER BY embedding::halfvec(3072) <=> $1::halfvec(3072) LIMIT 5`"
+    - "`LIMIT` を外す"
+    - "`hnsw.ef_search` を 1 にする"
+    - "演算子を `<->` に変える"
+  answer: A
+  explanation: |
+    式インデックスは、クエリの式がインデックスの式と**一致する**ときだけ使われます。列をキャストしたインデックスなら、クエリでも同じキャストを行います。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-inner-product
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, distance]
+  question: |
+    使っている埋め込みモデルは長さ 1 に**正規化された**ベクトルを返します。検索の計算コストを少しでも下げたいとき、距離の選び方として最も適切なものはどれですか。
+  options:
+    - "内積（`<#>`、`vector_ip_ops`）を使う。正規化済みならコサインと同じ順位になり、計算が最も軽い"
+    - "L1 距離（`<+>`）を使う"
+    - "コサイン距離のまま `hnsw.ef_search` を 1 にする"
+    - "正規化済みのベクトルでは距離を使い分けても順位が変わるので、必ずコサインを使う"
+  answer: A
+  explanation: |
+    長さ 1 のベクトルでは、内積・コサイン類似度・L2 距離の順位は一致します。pgvector のドキュメントでも、正規化されたベクトルには内積が推奨されています（`<#>` は**負の**内積を返すので、そのまま昇順で並べればよい）。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-selective-filter
+  objective: "2.7"
+  type: yesno
+  difficulty: 3
+  tags: [postgresql, pgvector, planner]
+  question: |
+    `chunks` には `(tenant_id)` の B-tree インデックスと、`embedding` の HNSW インデックスがあります。`WHERE tenant_id = $1 ORDER BY embedding <=> $2 LIMIT 10` を実行するときについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "テナントの行数がごく少ない場合、プランナーは B-tree で絞り込んでから正確な距離で並べ替える計画を選ぶことがある。"
+      answer: true
+    - text: "その場合の結果は総当たりと同じ（近似による取りこぼしがない）。"
+      answer: true
+    - text: "HNSW を使う計画では、フィルターはインデックスの走査後に適用されるため、件数が不足することがある。"
+      answer: true
+    - text: "`EXPLAIN ANALYZE` を使っても、どちらの計画が選ばれたかは確認できない。"
+      answer: false
+  explanation: |
+    PostgreSQL のプランナーはコストを見積もって計画を選びます。条件に合う行が少なければ、B-tree で絞って正確な距離計算をする方が速く、結果も正確です。`EXPLAIN ANALYZE` で実際の計画（Index Scan using ... / Bitmap Heap Scan など）を確認できます。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-partial-index
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, partial-index]
+  question: |
+    検索の 9 割は `doc_type = 'manual'` に絞った問い合わせで、この種類の行は全体の 5% しかありません。HNSW で全体を検索してからフィルターすると件数が足りなくなります。最も効果的なインデックスはどれですか。
+  options:
+    - "`CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops) WHERE doc_type = 'manual';`（部分インデックス）"
+    - "`doc_type` に GIN インデックス"
+    - "HNSW の `m` を 2 にする"
+    - "`embedding` に B-tree インデックス"
+  answer: A
+  explanation: |
+    **部分インデックス**は条件に合う行だけを索引付けします。同じ条件のクエリではこのインデックスが使われ、フィルター後の件数不足が起きず、インデックスも小さくなります。条件の値が少数に限られる場合に有効です（多数ならパーティショニングを検討）。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://www.postgresql.org/docs/current/indexes-partial.html
+
+- id: d-pg-ef-search-tradeoff
+  objective: "2.7"
+  type: match
+  difficulty: 2
+  tags: [postgresql, pgvector, tuning]
+  question: |
+    pgvector の HNSW / IVFFlat のパラメーターを変えたときの主な影響を対応付けてください。
+  pairs:
+    - left: "`hnsw.ef_search` を大きくする"
+      right: "検索のリコールが上がり、遅くなる"
+    - left: "`ef_construction` を大きくしてインデックスを作る"
+      right: "インデックスの品質（リコール）が上がり、作成が遅くなる"
+    - left: "`ivfflat.probes` を `lists` と同じ値にする"
+      right: "総当たりと同じ結果になる（プランナーはインデックスを使わない）"
+  distractors:
+    - "ストレージ使用量が半分になる"
+  explanation: |
+    `ef_search` / `probes` は検索時、`m` / `ef_construction` / `lists` は作成時のパラメーターです。いずれもリコールと速度（またはビルド時間・メモリ）のトレードオフです。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+# ---------- 2.8 ----------
+- id: d-pg-burstable-prod
+  objective: "2.8"
+  type: single
+  difficulty: 2
+  tags: [postgresql, compute, burstable]
+  question: |
+    開発中は Burstable（B2s）で問題なかったベクトル検索 API が、本番で一日中負荷がかかるようになると、昼過ぎから急に遅くなります。CPU 使用率のグラフは午前中は高く、その後は低い値に張り付いています。最も可能性の高い原因と対処はどれですか。
+  options:
+    - "Burstable の CPU クレジットを使い切り、ベースライン性能に制限されている。継続的な負荷には General Purpose（または Memory Optimized）を使う"
+    - "pgvector のバージョンが古い"
+    - "`hnsw.ef_search` が小さすぎる"
+    - "接続文字列の SSL 設定が誤っている"
+  answer: A
+  explanation: |
+    Burstable はアイドル時にクレジットをためて一時的に高い性能を出す層で、継続的な高負荷には向きません。また、組み込み PgBouncer や読み取りレプリカも Burstable では使えません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/overview
+
+- id: d-pg-storage-readonly
+  objective: "2.8"
+  type: single
+  difficulty: 3
+  tags: [postgresql, storage]
+  question: |
+    埋め込みを大量に投入していたところ、PostgreSQL が突然書き込みを受け付けなくなりました（読み取りはできる）。ストレージ使用率が 95% を超えています。再発を防ぐ設定として最も適切なものはどれですか。
+  options:
+    - "ストレージの自動拡張（storage autogrow）を有効にし、使用率のアラートを設定する"
+    - "`max_connections` を増やす"
+    - "HNSW インデックスを削除する"
+    - "Burstable 層に変更する"
+  answer: A
+  explanation: |
+    ストレージ使用率が上限付近（95% など）に達すると、ディスクがいっぱいになるのを防ぐためサーバーは読み取り専用になります。自動拡張を有効にし、使用率を監視しておきます。大量投入ではインデックスや WAL の一時的な増加も見込みます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/scale/concepts-scaling-resources
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+- id: d-pg-scale-restart
+  objective: "2.8"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, scale]
+  question: |
+    Azure Database for PostgreSQL フレキシブル サーバーのスケーリングについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "vCore 数やコンピューティング層を変更すると、サーバーが再起動し、短時間接続できなくなる。"
+      answer: true
+    - text: "読み取りレプリカは Burstable 層でも作成できる。"
+      answer: false
+    - text: "読み取りレプリカへのレプリケーションは非同期なので、直前の書き込みがすぐに読めないことがある。"
+      answer: true
+    - text: "アプリは再起動やフェールオーバーに備えて、一時的なエラーを再試行する実装にしておくべきである。"
+      answer: true
+  explanation: |
+    コンピューティングの変更は再起動を伴うので、ピーク外に行い、アプリ側で再試行を実装します。読み取りレプリカは General Purpose / Memory Optimized で利用でき、非同期レプリケーションのため遅延（レプリカ ラグ）があります。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/scale/concepts-scaling-resources
+    - https://learn.microsoft.com/azure/postgresql/read-replica/concepts-read-replicas
+
+- id: d-pg-elastic-cluster
+  objective: "2.8"
+  type: single
+  difficulty: 3
+  tags: [postgresql, scale, elastic-cluster]
+  question: |
+    1 台の最大 SKU でも、書き込みとストレージの量が足りなくなる見込みです。データはテナント単位で独立しています。PostgreSQL のまま水平にスケールする選択肢として最も適切なものはどれですか。
+  options:
+    - "エラスティック クラスター（Citus ベース）でテナント ID を分散キーにしてシャーディングする"
+    - "読み取りレプリカを 5 台作る"
+    - "ゾーン冗長の高可用性を有効にする"
+    - "PgBouncer のプール サイズを大きくする"
+  answer: A
+  explanation: |
+    読み取りレプリカは読み取りしか分散できず、高可用性はスタンバイ（待機系）です。書き込みとストレージを複数ノードに分散するには、**エラスティック クラスター**でテーブルを分散（シャーディング）します。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/elastic-clusters/concepts-elastic-clusters
+
+- id: d-pg-memory-parameters
+  objective: "2.8"
+  type: match
+  difficulty: 3
+  tags: [postgresql, parameters, memory]
+  question: |
+    PostgreSQL のメモリ関連パラメーターと、ベクトル ワークロードでの主な役割を対応付けてください。
+  pairs:
+    - left: "maintenance_work_mem"
+      right: "インデックス作成（HNSW のグラフ構築など）に使うメモリ"
+    - left: "shared_buffers"
+      right: "テーブルやインデックスのページをキャッシュする共有メモリ"
+    - left: "work_mem"
+      right: "クエリごとの並べ替えやハッシュに使うメモリ"
+  distractors:
+    - "WAL の保持期間"
+  explanation: |
+    HNSW のビルドはグラフが `maintenance_work_mem` に収まると速くなります。検索性能は、インデックスが `shared_buffers` や OS のキャッシュに載っているかで大きく変わります。`work_mem` は接続・操作ごとに確保されるため、大きくしすぎると接続数との掛け算でメモリを圧迫します。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+    - https://www.postgresql.org/docs/current/runtime-config-resource.html
+
+# ---------- 2.9 ----------
+- id: d-pg-hybrid-rrf
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [postgresql, hybrid-search, rag]
+  question: |
+    PostgreSQL で、ベクトル検索の上位 50 件と全文検索（`ts_rank`）の上位 50 件を組み合わせたハイブリッド検索を作ります。2 つのスコアは尺度がまったく違います。結果を統合する方法として最も適切なものはどれですか。
+  options:
+    - "それぞれの結果の順位から RRF（Reciprocal Rank Fusion: Σ 1/(k + 順位)）を計算して並べ替える"
+    - "コサイン距離と `ts_rank` の値をそのまま足し合わせる"
+    - "全文検索の結果だけを使う"
+    - "ベクトル検索の `LIMIT` を 1 にする"
+  answer: A
+  explanation: |
+    尺度の違うスコアを直接足すと、片方に偏ります。RRF は**順位**だけを使うため、尺度の違う検索結果を統合しやすい手法です。SQL では 2 つの検索を CTE で行い、順位（`ROW_NUMBER()`）から RRF を計算して結合します。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-parent-context
+  objective: "2.9"
+  type: single
+  difficulty: 2
+  tags: [postgresql, rag]
+  question: |
+    RAG で、類似度の高いチャンクだけを LLM に渡すと文脈が足りず、回答の質が下がります。PostgreSQL の設計を活かした改善として最も適切なものはどれですか。
+  options:
+    - "上位 k 件のチャンクを取得したあと、`document_id` と `chunk_index` を使って前後のチャンクや文書のタイトルを JOIN で取得し、プロンプトに含める"
+    - "ベクトル インデックスを削除する"
+    - "上位 1 件だけを渡す"
+    - "チャンクを 1 文字ずつに分割する"
+  answer: A
+  explanation: |
+    リレーショナルなスキーマなら、検索で見つけたチャンクから、隣接チャンクや親文書のメタデータを効率的に取得できます。ベクトル検索と業務データの結合は PostgreSQL の強みです。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/azure-ai/generative-ai-overview
+
+- id: d-pg-similarity-calc
+  objective: "2.9"
+  type: single
+  difficulty: 2
+  tags: [postgresql, pgvector, distance]
+  question: |
+    `SELECT embedding <=> $1 AS d FROM chunks ...` の結果、`d = 0.18` でした。このチャンクと質問のコサイン類似度はいくつですか。
+  options:
+    - "0.82"
+    - "0.18"
+    - "-0.18"
+    - "5.56"
+  answer: A
+  explanation: |
+    `<=>` はコサイン**距離**で、コサイン類似度 = 1 − 距離 = 1 − 0.18 = **0.82** です。しきい値で絞るときは、距離（小さいほど近い）か類似度（大きいほど近い）かを取り違えないようにします。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-azure-ai-trigger
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [postgresql, azure-ai, embeddings]
+  question: |
+    `azure_ai` 拡張機能の `azure_openai.create_embeddings()` を、`chunks` テーブルの INSERT トリガーから呼んで埋め込みを自動生成しようとしています。大量投入時の懸念として最も重要なものはどれですか。
+  options:
+    - "1 行ごとに外部の埋め込み API を同期呼び出しするため、投入が遅くなり、API のレート制限や一時エラーでトランザクションが失敗しうる。大量処理はバッチや非同期ジョブで行う方がよい"
+    - "`azure_ai` 拡張機能は INSERT では使えない"
+    - "トリガーを使うとベクトル インデックスが作れなくなる"
+    - "生成された埋め込みは `text` 型でしか保存できない"
+  answer: A
+  explanation: |
+    データベース内から埋め込み API を呼べるのは便利ですが、行ごとの同期呼び出しは遅延・レート制限・失敗時のロールバックの影響を受けます。大量の初期投入や再計算は、バッチ処理や Service Bus などの非同期ワーカーで行うのが一般的です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/azure-ai/generative-ai-azure-overview
+
+- id: d-pg-rag-filter-design
+  objective: "2.9"
+  type: multiple
+  difficulty: 3
+  tags: [postgresql, rag, security]
+  question: |
+    社内 RAG で、利用者が**閲覧権限を持つ文書だけ**を検索結果に含めなければなりません。PostgreSQL での実装として適切なものを **2 つ**選んでください。
+  options:
+    - "ベクトル検索の SQL の `WHERE` に、利用者の所属グループなどで権限を絞る条件を入れる（検索の前段で絞る）"
+    - "行レベル セキュリティ（RLS）のポリシーで、セッションの利用者に応じて見える行を制限する"
+    - "上位 5 件を取得してから、アプリで権限のない文書を除外する（足りなくなっても気にしない）"
+    - "LLM に「権限のない文書は使わないで」と指示する"
+  answer: [A, B]
+  explanation: |
+    権限による絞り込みは**検索の段階**で行います。SQL の条件や RLS で行うと、権限のない文書が LLM に渡ることを防げます。検索後に除外すると件数が足りなくなり、LLM への指示はセキュリティ境界になりません。
+  refs:
+    - https://www.postgresql.org/docs/current/ddl-rowsecurity.html
+
+# ---------- 2.10 ----------
+- id: d-pg-pool-math
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, connection-pool, functions]
+  question: |
+    Azure Functions（Flex Consumption）が最大 100 インスタンスまでスケールし、各インスタンスが最大 10 接続のプールを持ちます。PostgreSQL の `max_connections` は 500 です。ピーク時に起こりうることと、最も適切な対策はどれですか。
+  options:
+    - "最大 1,000 接続が要求され上限を超える。組み込み PgBouncer（6432）に接続して実接続数を抑え、各インスタンスのプールも小さくする"
+    - "Functions は接続を共有するので問題は起きない"
+    - "`max_connections` を 10,000 にすれば、メモリに関係なく解決する"
+    - "接続プールを使わず、リクエストごとに接続する"
+  answer: A
+  explanation: |
+    最大接続数は「インスタンス数 × プール サイズ」です。PostgreSQL は 1 接続 = 1 プロセスなので、`max_connections` を大きくしすぎるとメモリを圧迫します。PgBouncer は多数のクライアント接続を少ないサーバー接続に多重化します（`max_client_conn` 既定 5000、`default_pool_size` 既定 50）。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices
+
+- id: d-pg-transaction-pooling-limits
+  objective: "2.10"
+  type: yesno
+  difficulty: 3
+  tags: [postgresql, pgbouncer]
+  question: |
+    組み込み PgBouncer（transaction プール モード）経由で接続するアプリについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "セッションに設定した `SET`（`SET LOCAL` ではない）が、次のトランザクションでも有効とは限らない。"
+      answer: true
+    - text: "一時テーブルを作成して、別のトランザクションで使う処理は期待どおりに動かないことがある。"
+      answer: true
+    - text: "1 つのトランザクションの中では、同じサーバー接続が使われる。"
+      answer: true
+    - text: "プリペアド トランザクション（`PREPARE TRANSACTION`）を使える。"
+      answer: false
+  explanation: |
+    transaction モードでは、トランザクションが終わるとサーバー接続がプールに戻り、次のトランザクションは別の接続になることがあります。セッション状態に依存する機能（セッションの SET、一時テーブル、LISTEN など）は注意が必要です。組み込み PgBouncer の transaction モードはプリペアド トランザクションをサポートしません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices
+    - https://www.pgbouncer.org/features.html
+
+- id: d-pg-retry-failover
+  objective: "2.10"
+  type: single
+  difficulty: 2
+  tags: [postgresql, resilience]
+  question: |
+    ゾーン冗長の高可用性を有効にした PostgreSQL で計画メンテナンスのフェールオーバーが起きると、数十秒間アプリでエラーが出ます。アプリ側で行うべき対策はどれですか。
+  options:
+    - "接続エラーや一時的なエラーを指数バックオフで再試行し、接続を張り直す。接続文字列はホスト名のまま使う（IP を固定しない）"
+    - "フェールオーバーを無効にする"
+    - "毎回新しいサーバーを作る"
+    - "エラーが出たらアプリを停止する"
+  answer: A
+  explanation: |
+    フェールオーバー後もホスト名は同じで、DNS が新しいプライマリを指します。アプリは一時的なエラーに備えて再試行を実装します。組み込み PgBouncer もフェールオーバー後に新しいプライマリで再起動され、接続文字列は変わりません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer
+    - https://learn.microsoft.com/azure/postgresql/scale/concepts-scaling-resources
+
+- id: d-pg-latency-placement
+  objective: "2.10"
+  type: single
+  difficulty: 2
+  tags: [postgresql, latency]
+  question: |
+    RAG の 1 回の回答で、PostgreSQL に 6 回の小さなクエリを順番に実行しています。アプリは West US、DB は Japan East にあり、1 往復に約 100 ms かかります。遅延を最も大きく減らす方法はどれですか。
+  options:
+    - "アプリを DB と同じリージョン（可能なら同じゾーン）に置き、クエリの往復回数も減らす（1 つの SQL にまとめるなど）"
+    - "`hnsw.ef_search` を下げる"
+    - "PgBouncer のプール サイズを増やす"
+    - "Memory Optimized 層にスケールアップする"
+  answer: A
+  explanation: |
+    小さなクエリを順番に実行する処理では、ネットワークの往復時間が支配的です（6 往復 × 100 ms = 600 ms）。同じリージョンに配置し、往復回数を減らすのが最も効果的です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices
+
+- id: d-pg-pgbouncer-params
+  objective: "2.10"
+  type: match
+  difficulty: 3
+  tags: [postgresql, pgbouncer]
+  question: |
+    組み込み PgBouncer のパラメーターと意味を対応付けてください。
+  pairs:
+    - left: "pgbouncer.max_client_conn（既定 5000）"
+      right: "PgBouncer が受け付けるクライアント接続の最大数"
+    - left: "pgbouncer.default_pool_size（既定 50）"
+      right: "ユーザーとデータベースの組ごとに PostgreSQL へ張るサーバー接続の数"
+    - left: "pgbouncer.pool_mode（既定 transaction）"
+      right: "サーバー接続をいつ他のクライアントに再利用させるか"
+  distractors:
+    - "HNSW の探索候補数"
+  explanation: |
+    クライアント接続は多くても、実際の PostgreSQL への接続は `default_pool_size` 程度に抑えられます。待ちが発生する場合は `query_wait_timeout`（既定 120 秒）を超えると切断されます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer
