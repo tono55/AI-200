@@ -1,0 +1,385 @@
+# 分野 3 追加問題（3 周目）: Event Grid（3.2）
+
+- id: s-eg-system-topic-per-source
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, system-topic]
+  question: |
+    ストレージ アカウント `stdocs` のイベントを、埋め込みサービスと監査サービスの 2 つに配信したいです。チームごとに別々のシステム トピックを作ろうとしたところ、2 つ目の作成に失敗しました。正しい構成はどれですか。
+  options:
+    - "1 つのリソースに作れるシステム トピックは 1 つなので、その 1 つのシステム トピックにイベント サブスクリプションを 2 つ作る"
+    - "カスタム トピックを 2 つ作り、ストレージ アカウントからそれぞれに発行させる"
+    - "ストレージ アカウントを 2 つに分ける"
+    - "Event Grid ドメインを作り、ストレージ アカウントを登録する"
+  answer: A
+  explanation: |
+    システム トピックは Azure リソース（イベントの発生元）ごとに 1 つです。配信先ごとの違い（フィルター、再試行、配信不能の設定）は、**イベント サブスクリプション**の単位で設定します。
+    Azure サービスのイベントはシステム トピックにしか発行されないので、カスタム トピックやドメインで代用はできません。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/system-topics
+
+- id: s-eg-roles-match
+  objective: "3.2"
+  type: match
+  difficulty: 2
+  tags: [event-grid, rbac]
+  question: |
+    Event Grid のカスタム トピックに関する作業と、割り当てる最小限の組み込みロールを対応付けてください。
+  pairs:
+    - left: "アプリのマネージド ID が、カスタム トピックにイベントを発行する"
+      right: "EventGrid Data Sender"
+    - left: "各チームが、既存のトピックに自分たちのイベント サブスクリプションを作成・管理する（トピック自体は変更しない）"
+      right: "EventGrid EventSubscription Contributor"
+    - left: "基盤チームが、トピックの作成・削除を含めて Event Grid のリソースを管理する"
+      right: "EventGrid Contributor"
+  distractors:
+    - "Azure Service Bus Data Sender"
+  explanation: |
+    イベントの発行（データ プレーン）は **EventGrid Data Sender**、サブスクリプションの管理だけなら **EventGrid EventSubscription Contributor**、トピックなどリソース全体の管理は **EventGrid Contributor** です。発行するアプリにはトピックを管理する権限を与えず、データの送信だけを許可します。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/security-authorization
+
+- id: s-eg-advanced-filter-logic
+  objective: "3.2"
+  type: yesno
+  difficulty: 3
+  tags: [event-grid, advanced-filter]
+  question: |
+    イベント サブスクリプションに、次の 2 つの高度なフィルターを設定しました。
+    - フィルター 1: `data.contentType` が `StringIn` で `application/pdf`、`text/markdown`
+    - フィルター 2: `data.contentLength` が `NumberLessThan` で `52428800`
+
+    次の記述が正しいかを答えてください。
+  statements:
+    - text: "50 MB 未満の PDF のイベントは配信される。"
+      answer: true
+    - text: "50 MB 未満の Markdown のイベントは配信される。"
+      answer: true
+    - text: "80 MB の PDF のイベントは配信される（フィルター同士は OR で評価されるため）。"
+      answer: false
+    - text: "1 つのフィルターに複数の値を並べた場合、値同士は OR で評価される。"
+      answer: true
+  explanation: |
+    高度なフィルターは、**フィルター同士は AND**、**1 つのフィルター内の複数の値は OR** で評価されます。この設定は「（PDF または Markdown）かつ 50 MB 未満」という意味になります。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+
+- id: s-eg-subject-case
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, subject-filter]
+  question: |
+    サブジェクト フィルターで「次で終わる」に `.pdf` を設定しました。利用者がアップロードした `Manual.PDF` のイベントも届いていますが、要件では小文字の `.pdf` のファイルだけを対象にしたいです。どうしますか。
+  options:
+    - "イベント サブスクリプションで「サブジェクトの大文字と小文字を区別する」（`isSubjectCaseSensitive`）を有効にする"
+    - "サブジェクト フィルターに正規表現 `\\.pdf$` を書く"
+    - "高度なフィルターの `StringEndsWith` は大文字と小文字を区別するので、そちらに置き換える"
+    - "イベントの種類に `Microsoft.Storage.BlobRenamed` を追加する"
+  answer: A
+  explanation: |
+    サブジェクト フィルターの比較は、既定では**大文字と小文字を区別しません**。区別したい場合は、サブスクリプションの `isSubjectCaseSensitive` を true にします。サブジェクト フィルターは前方一致・後方一致だけで、正規表現は使えません。
+    高度なフィルターの文字列比較も大文字と小文字を区別しないため、置き換えても解決しません。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+
+- id: s-eg-functions-trigger
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, functions, webhook-validation]
+  question: |
+    Event Grid のイベントを Azure Functions で処理します。HTTP トリガーの関数のエンドポイントを Webhook として登録しようとしたところ、エンドポイントの検証に失敗しました。最も簡単で適切な対処はどれですか。
+  options:
+    - "関数を Event Grid トリガーに変更し、イベント サブスクリプションの配信先の種類に「Azure 関数」を選ぶ"
+    - "関数の承認レベルを Anonymous にする"
+    - "イベント サブスクリプションの再試行回数を増やす"
+    - "Event Grid スキーマから CloudEvents スキーマに変更する"
+  answer: A
+  explanation: |
+    Webhook には、サブスクリプション作成時の検証ハンドシェイク（`SubscriptionValidationEvent` への応答、または CloudEvents の OPTIONS 要求への応答）を実装する必要があります。**Event Grid トリガー**の関数を配信先にすれば、検証は Functions の側で自動的に処理され、イベントの配信も関数のキーを使わずに安全に行われます。
+    承認レベルを下げても検証の応答は実装されず、セキュリティも下がります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-event-grid-trigger
+    - https://learn.microsoft.com/azure/event-grid/end-point-validation-cloud-events-schema
+
+- id: s-eg-delivery-headers
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, webhook, delivery-properties, security]
+  question: |
+    外部の SaaS の Webhook にイベントを配信します。SaaS 側は、すべての要求に `Authorization: Bearer <API キー>` ヘッダーを要求しています。Event Grid の機能で、この要件を満たす方法として最も適切なものはどれですか。
+  options:
+    - "イベント サブスクリプションの配信プロパティ（カスタム ヘッダー）に `Authorization` を追加し、シークレットとしてマークする"
+    - "イベントの本文に API キーを含めて発行する"
+    - "Webhook の URL のパスに API キーを含める"
+    - "Event Grid は配信時にヘッダーを追加できないため、中継用の関数を必ず作る"
+  answer: A
+  explanation: |
+    イベント サブスクリプションの**配信プロパティ**で、配信要求に付けるヘッダー（最大 10 個）を設定できます。固定値のほか、イベントのデータから値を取り出す動的な値も指定できます。認証情報のような値は「シークレット」としてマークすると、ポータルなどで表示されなくなります。
+    本文や URL にキーを含めると、ログなどから漏れやすくなります。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-properties
+
+- id: s-eg-entra-webhook
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, webhook, entra-id]
+  question: |
+    社内の Web API（Microsoft Entra ID で保護、アプリ登録済み）を Event Grid の Webhook ハンドラーにします。API は Entra のアクセス トークンがない要求を拒否します。Event Grid から安全に配信するための構成として最も適切なものはどれですか。
+  options:
+    - "イベント サブスクリプションで Microsoft Entra 認証を有効にし、API のアプリ登録（アプリケーション ID / URI）を指定する。API 側では Event Grid からのトークンを受け入れるように構成する"
+    - "API の認証を無効にして、IP 制限だけにする"
+    - "API のクライアント シークレットをイベントの本文に入れる"
+    - "Event Grid のシステム トピックの SAS キーを API に渡す"
+  answer: A
+  explanation: |
+    Event Grid は、Microsoft Entra で保護されたエンドポイントへ、Entra のアクセス トークンを付けてイベントを配信できます。サブスクリプションに対象のアプリ登録（オーディエンス）を指定し、API 側でそのトークンを受け入れる（必要なアプリ ロールを Event Grid に割り当てる）ことで、資格情報を共有せずに認証できます。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/secure-webhook-delivery
+
+- id: s-eg-private-handler
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, private-endpoint, network]
+  question: |
+    イベントの処理先は、VNet 内でプライベート エンドポイントだけを公開している Web API です。Event Grid のイベント サブスクリプションの Webhook に、このプライベートな URL を登録しても配信できません。最も適切な構成はどれですか。
+  options:
+    - "Event Grid からは、マネージド ID による配信で Service Bus（または Event Hubs・Storage キュー）に送り、VNet 内のワーカーがそこから受信する"
+    - "Webhook の URL を IP アドレスで指定すれば配信できる"
+    - "Event Grid のシステム トピックにプライベート エンドポイントを作れば、送信側もプライベートになる"
+    - "再試行回数を最大にする"
+  answer: A
+  explanation: |
+    Event Grid は、Webhook でのプライベート エンドポイントへの配信をサポートしていません。マネージド ID による配信で、ネットワークが制限された Service Bus などに「信頼されたサービス」として送り、VNet 内のワーカーがプライベート エンドポイント経由で受信する構成にします。
+    トピックのプライベート エンドポイントは**発行（受信側）**のためのもので、配信（送信側）には効きません。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/consume-private-endpoints
+
+- id: s-eg-ordering
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, ordering, service-bus, sessions]
+  question: |
+    文書ごとに「作成 → 更新 → 削除」のイベントがカスタム トピックに発行されます。ハンドラーで、まれに「削除」が「更新」より先に処理され、削除したはずの文書が復活します。同じ文書のイベントを順番どおりに処理したい場合、最も適切な対策はどれですか。
+  options:
+    - "Event Grid は配信の順序を保証しないため、Service Bus のセッション（セッション ID = 文書 ID）に配信して順番に処理する（またはイベントのバージョンや時刻を見て古い更新を無視する）"
+    - "イベント サブスクリプションでバッチ配信を有効にする"
+    - "CloudEvents スキーマに変える"
+    - "再試行回数を 1 にする"
+  answer: A
+  explanation: |
+    Event Grid は配信の順序を保証しません（再試行などで順序が入れ替わります）。順序が重要なら、Service Bus のセッションで同じ文書のイベントを 1 つのワーカーに順番に届けるか、ハンドラー側でバージョン番号や発生時刻を比較して古いイベントを無視する設計にします。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-sessions
+
+- id: s-eg-event-size
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, event-size, claim-check]
+  question: |
+    「要約が完成した」というカスタム イベントの `data` に要約の全文（最大数 MB）を入れて発行すると、大きな要約のときだけ発行に失敗します。最も適切な設計はどれですか。
+  options:
+    - "要約の全文は Blob Storage に保存し、イベントには Blob の URL や ID などの参照だけを入れる"
+    - "イベントを圧縮して Base64 にする"
+    - "イベント サブスクリプションでバッチ配信を有効にする"
+    - "Event Grid ドメインに変更すれば、大きなイベントも発行できる"
+  answer: A
+  explanation: |
+    Event Grid のイベントにはサイズの上限（1 MB）があり、課金も 64 KB 単位です。イベントは「何が起きたか」を知らせる軽い通知にし、大きなデータは別のストレージに置いて参照を渡します（クレーム チェック パターン）。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/quotas-limits
+    - https://learn.microsoft.com/azure/architecture/patterns/claim-check
+
+- id: s-eg-deadletter-investigation
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, dead-letter, troubleshooting]
+  question: |
+    配信不能先の Blob コンテナーにイベントがたまっていました。なぜ配信に失敗したのかを調べるとき、配信不能になったイベントのどの情報を見るのが最も有効ですか。
+  options:
+    - "Event Grid が追加する `deadLetterReason`、`deliveryAttempts`、`lastDeliveryOutcome`、`lastHttpStatusCode` などのプロパティ"
+    - "イベントの `id` だけ"
+    - "ストレージ アカウントのアクセス キー"
+    - "イベント サブスクリプションの作成日時"
+  answer: A
+  explanation: |
+    配信不能先に書き込まれるイベントには、元のイベントに加えて、配信不能の理由（`MaxDeliveryAttemptsExceeded`、`TimeToLiveExceeded` など）、試行回数、最後の配信結果と HTTP 状態コードが付きます。たとえば 400 で即座に配信不能になったのか、503 の再試行を使い切ったのかで、ハンドラーの直すべき箇所が変わります。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+    - https://learn.microsoft.com/azure/event-grid/manage-event-delivery
+
+- id: s-eg-metrics-alert
+  objective: "3.2"
+  type: match
+  difficulty: 2
+  tags: [event-grid, monitoring, metrics]
+  question: |
+    確認したいことと、使う Event Grid のメトリックを対応付けてください。
+  pairs:
+    - left: "フィルターに一致して、配信の対象になったイベントの数"
+      right: "Matched Events"
+    - left: "ハンドラーへの配信が失敗した回数（再試行を含む）"
+      right: "Delivery Failed Events"
+    - left: "最終的に配信できず、配信不能先に送られたイベントの数"
+      right: "Dead Lettered Events"
+  distractors:
+    - "Active Connections"
+  explanation: |
+    発行数（Published Events）→ 一致数（Matched Events）→ 配信の成功・失敗 → 配信不能・破棄、の順に見ると、どこでイベントが失われているかがわかります。Dead Lettered Events や Dropped Events にアラートを設定しておくと、ハンドラーの障害に早く気づけます。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/monitor-event-delivery
+
+- id: s-eg-pull-operations
+  objective: "3.2"
+  type: match
+  difficulty: 3
+  tags: [event-grid, namespace, pull-delivery]
+  question: |
+    Event Grid 名前空間のトピックをプル配信で受信するワーカーがあります。受信したイベントに対する操作と、その結果を対応付けてください。
+  pairs:
+    - left: "acknowledge（確認）"
+      right: "処理が完了したので、イベントが削除される"
+    - left: "release（解放）"
+      right: "ロックが解除され、再び受信できるようになる（一時的な失敗のとき）"
+    - left: "reject（拒否）"
+      right: "処理できないイベントとして、配信不能先（構成されていれば）に送られる"
+    - left: "renew lock（ロックの更新）"
+      right: "処理に時間がかかるため、ロックの期限を延ばす"
+  distractors:
+    - "イベントの本文を書き換える"
+  explanation: |
+    プル配信は、受信するとイベントがロックされ、処理結果に応じて確認・解放・拒否を返す仕組みです（Service Bus の complete / abandon / dead-letter と似ています）。ワーカーが自分のペースで取りに行くので、受信用の公開エンドポイントが不要です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/pull-delivery-overview
+
+- id: s-eg-cloudevents-batch
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, cloudevents, rest]
+  question: |
+    SDK を使えない環境から、REST で複数の CloudEvents を 1 回の要求でカスタム トピックに発行します。要求本文は CloudEvents の JSON の配列です。指定すべき `Content-Type` はどれですか。
+  options:
+    - "`application/cloudevents-batch+json; charset=utf-8`"
+    - "`application/cloudevents+json; charset=utf-8`"
+    - "`text/plain`"
+    - "`application/x-www-form-urlencoded`"
+  answer: A
+  explanation: |
+    CloudEvents の HTTP バインディングでは、1 件のイベントは `application/cloudevents+json`、複数のイベントの配列（バッチ）は `application/cloudevents-batch+json` を使います。認証は Entra のトークン（EventGrid Data Sender）か、アクセス キー（`aeg-sas-key` ヘッダー）です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/cloud-event-schema
+    - https://learn.microsoft.com/rest/api/eventgrid/
+
+- id: s-eg-topic-types
+  objective: "3.2"
+  type: match
+  difficulty: 2
+  tags: [event-grid, topics]
+  question: |
+    イベントの発生元と、使う Event Grid のトピックの種類を対応付けてください。
+  pairs:
+    - left: "Blob Storage や Key Vault など、Azure サービスが発行するイベント"
+      right: "システム トピック"
+    - left: "自分のアプリが発行する、業務のイベント（1 種類のアプリ）"
+      right: "カスタム トピック"
+    - left: "SaaS で、顧客ごとに分かれた大量のトピックを 1 つのエンドポイントで管理する"
+      right: "ドメイン"
+    - left: "Microsoft 以外の SaaS パートナーが発行するイベント"
+      right: "パートナー トピック"
+  distractors:
+    - "Service Bus のトピック"
+  explanation: |
+    Azure サービスのイベントはシステム トピック、自分のアプリのイベントはカスタム トピック、多数の顧客ごとのトピックをまとめて管理するならドメイン、外部 SaaS のイベントはパートナー トピックを使います。Service Bus のトピックは Event Grid とは別の、メッセージングのサービスです。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/concepts
+
+- id: s-eg-subscription-expiration
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, event-subscription, expiration]
+  question: |
+    障害調査の間（1 週間）だけ、本番のカスタム トピックのイベントを調査用の Webhook にも配信したいです。調査が終わったあとにサブスクリプションの削除を忘れても、配信が続かないようにするには、どうしますか。
+  options:
+    - "イベント サブスクリプションに有効期限（`--expiration-date`）を設定する"
+    - "調査用 Webhook の TTL を 1 週間にする"
+    - "再試行回数を 0 にする"
+    - "トピックのアクセス キーを 1 週間後に再生成する"
+  answer: A
+  explanation: |
+    イベント サブスクリプションには有効期限を設定でき、期限を過ぎると自動で削除されます。一時的な配信先や検証用のサブスクリプションに向いています。
+    アクセス キーは発行側の認証で、再生成すると本番の発行が止まってしまいます。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/concepts#event-subscription-expiration
+    - https://learn.microsoft.com/cli/azure/eventgrid/event-subscription
+
+- id: s-eg-stale-events
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, retry, ttl]
+  question: |
+    「株価が更新された」というイベントで、キャッシュの値を更新しています。このイベントは 5 分を過ぎると意味がなくなり、古いイベントが遅れて届くと、かえって新しい値を古い値で上書きしてしまいます。ハンドラーが一時的に止まったときの再試行ポリシーとして、最も適切なものはどれですか。
+  options:
+    - "イベントの TTL を 5 分程度にし、それを過ぎたイベントは再試行せず配信不能（または破棄）にする。ハンドラーでもイベントの時刻を比較して古いものを無視する"
+    - "TTL を既定の 24 時間のままにして、すべて確実に届ける"
+    - "最大配信試行回数を 30 にする"
+    - "バッチ配信を有効にする"
+  answer: A
+  explanation: |
+    再試行ポリシーは、イベントの価値が続く時間に合わせて設定します。既定（24 時間・30 回）のままだと、ハンドラーの復旧後に古いイベントが遅れて届きます。TTL を短くすれば、価値がなくなったイベントは再試行されません。
+    それでも配信順は保証されないので、ハンドラー側でもイベントの発生時刻を見て、古いものを適用しないようにします。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/manage-event-delivery
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: s-eg-storage-queue-handler
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, storage-queue, handler]
+  question: |
+    Blob のアップロード イベントを、1 日 1 回動くバッチ ジョブでまとめて処理したいです。順序保証や重複検出などの高度な機能は不要で、最も安くイベントをためておきたい場合、イベント サブスクリプションの配信先として最も適切なものはどれですか。
+  options:
+    - "Storage キュー"
+    - "Webhook"
+    - "Event Hubs Premium"
+    - "Service Bus Premium のセッション付きキュー"
+  answer: A
+  explanation: |
+    Event Grid は Storage キューにも配信でき、イベントはキューのメッセージとして保存されます。ワーカーは好きなタイミングで取り出せるので、バッチ処理に向いています。Service Bus の高度な機能（セッション、重複検出、トランザクション）が不要なら、Storage キューが最も安価です。キューのメッセージの有効期限は、イベント サブスクリプションで指定できます。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/handler-storage-queues
+
+- id: s-eg-publish-retry
+  objective: "3.2"
+  type: yesno
+  difficulty: 3
+  tags: [event-grid, publishing, retry]
+  question: |
+    アプリが Python SDK の `EventGridPublisherClient` でカスタム トピックにイベントを発行しています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "発行がネットワークの一時的なエラーで失敗した場合、SDK の再試行ポリシーで自動的に再試行される。"
+      answer: true
+    - text: "発行の再試行で同じイベントが 2 回届くことがあるため、受信側では `id` で重複を除けるようにしておく。"
+      answer: true
+    - text: "発行が成功（200）すれば、それ以降の配信の失敗はイベント サブスクリプションの再試行ポリシーと配信不能の設定で扱われる。"
+      answer: true
+    - text: "発行時に、配信先の Webhook がダウンしていると発行自体がエラーになる。"
+      answer: false
+  explanation: |
+    発行（アプリ → トピック）と配信（トピック → ハンドラー）は別の段階です。発行の一時的な失敗は SDK の再試行で、配信の失敗はサブスクリプションの再試行ポリシーで扱われます。発行はハンドラーの状態に関係なく、トピックが受け付ければ成功します。
+    発行の再試行では重複が起こりうるので、イベントの `id` を一定にしておき、受信側でべき等に処理します。
+  refs:
+    - https://learn.microsoft.com/python/api/overview/azure/eventgrid-readme
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
