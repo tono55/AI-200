@@ -7,7 +7,7 @@ Microsoft の新しいアソシエイト試験 **AI-200: Developing AI Cloud Sol
 旧試験 **AZ-204: Developing Solutions for Microsoft Azure**（2026-07-31 に廃止）の後継です。
 AZ-204 と重なる範囲は旧試験の知識も引用しています。
 
-> 情報は **2026-10-31 時点** の調査です。公式の出題範囲は **2026-10-07 版** の Skills measured を元にしています。
+> 情報は **2026-10-31 時点** の調査です。公式の出題範囲は **2026-10-07 版** の Skills measured を元にしています（公式スタディガイドを Microsoft Learn から直接取得して確認済み）。
 > 受験前に必ず [公式スタディガイド](https://learn.microsoft.com/credentials/certifications/resources/study-guides/ai-200) で最新版を確認してください。
 > 情報の出典と確度は [docs/sources.md](docs/sources.md) にまとめています。
 
@@ -21,23 +21,24 @@ AZ-204 と重なる範囲は旧試験の知識も引用しています。
 | 認定資格 | Microsoft Certified: Azure AI Cloud Developer Associate |
 | レベル | Associate（中級） |
 | 前身 | AZ-204（2026-07-31 廃止） |
-| 試験時間 | 120 分（一部の資料は 100 分と記載。公式ページで確認） |
+| 試験時間 | **100 分**（着席時間 120 分）。ラボが含まれる回は 120 分（着席 140 分）。正確な時間は申し込み時に表示 |
 | 合格点 | 700 / 1000（スケールスコア） |
-| 問題数 | 非公開（40〜60 問程度という報告が多い） |
+| 問題数 | 非公開（Microsoft の試験は通常 40〜60 問） |
 | 価格 | 米国 USD 165。国ごとに異なる |
 | 有効期限 | 1 年。Microsoft Learn で無料の更新評価（オンライン）を受けて延長 |
-| 公式トレーニング | AI-200T00（9 つのラーニングパス） |
+| 公式模擬試験 | **あり**（AI Skills Navigator の Practice Assessment: <http://aka.ms/AI200-PA>） |
+| 公式トレーニング | AI-200T00（AZ-204T00 の後継コース） |
 
 ### 出題分野（Skills at a glance）
 
 | # | 分野 | 配点 | 主なサービス |
 |---|---|---|---|
 | 1 | Develop containerized solutions on Azure | 20–25% | ACR / ACR Tasks / App Service（コンテナ）/ Container Apps / KEDA / AKS |
-| 2 | Develop AI solutions by using Azure data management services | **30–35%** ※ | Cosmos DB for NoSQL / Azure Database for PostgreSQL + pgvector / Azure Managed Redis |
+| 2 | Develop AI solutions by using Azure data management services | **25–30%** ※ | Cosmos DB for NoSQL / Azure Database for PostgreSQL + pgvector / Azure Managed Redis |
 | 3 | Connect to and consume Azure services | 20–25% | Service Bus / Event Grid / Azure Functions |
 | 4 | Secure, monitor, and troubleshoot Azure solutions | 20–25% | Key Vault / App Configuration / OpenTelemetry / KQL |
 
-※ 2026-10-07 の改訂で分野 2 の配点が引き上げられました。「Skills at a glance」は 30–35% ですが、詳細見出しは 25–30% のままです（公式ガイド内で不一致）。**最大配点の分野**であることは変わりません。
+※ 2026-10-07 の改訂で分野 2 は「% of exam increased（配点増）」とされた、**最大配点の分野**です。現在の公式ガイドの表記は 25–30% です（改訂直後は一時的に 30–35% と表記されていました）。
 
 **名前に「AI」とありますが、モデルやプロンプトを扱う試験ではありません。** AI アプリを支える
 **バックエンド開発**（コンテナ、ベクトル DB、メッセージング、監視）の試験です。

@@ -42,7 +42,7 @@
 - ローカル: Azure CLI、Python 3.11 以降、Docker、kubectl（`az aks install-cli`）、VS Code。
 - コストに注意が必要なもの: AKS のノード、Azure Managed Redis（最小でも時間課金）、PostgreSQL Flexible Server、Cosmos DB のプロビジョニング スループット。
   - Cosmos DB は **Free Tier**（アカウントあたり 1000 RU/s・25 GB まで無料）か**サーバーレス**を使う。
-  - PostgreSQL は Burstable（B1ms など）で十分。
+  - PostgreSQL は基本の練習なら Burstable（B1ms など）で十分。ただし**組み込み PgBouncer は Burstable では使えない**（General Purpose / Memory Optimized のみ）ので、接続最適化を試すときだけ General Purpose の最小 SKU にする。
   - Microsoft Learn の演習（Exercise）はサンドボックスや手順つきなので、まずはそれを使う。
 
 ## 4. 直前期（試験 1 週間前〜当日）
@@ -51,12 +51,14 @@
 - [ ] [service-selection.md](cheatsheets/service-selection.md) の判断表を、理由つきで説明できる
 - [ ] [cli-sdk.md](cheatsheets/cli-sdk.md) のコマンドを見て、何をするコマンドか即答できる
 - [ ] 各ノートの「チェックリスト」がすべて埋まっている
-- [ ] 模擬試験・Practice Assessment で 80% 以上
+- [ ] 公式 Practice Assessment（<http://aka.ms/AI200-PA>）で 80% 以上
+- [ ] Exam Readiness Zone の対策動画（<https://aka.ms/AI200-ExamPrep>）を視聴
 - [ ] 試験当日: 本人確認書類、オンラインならシステムチェック（OnVUE）と机の上の片づけ
 
 ## 5. 試験中の時間配分
 
-- 120 分・50 問前後なら、**1 問 2 分**が目安。ケーススタディは別に時間を取っておく。
+- 試験時間 100 分（ラボがある回は 120 分）・50 問前後なら、**1 問 1.5〜2 分**が目安。ケーススタディは別に時間を取っておく。
 - 迷った問題は「後で見直す」マークをつけて先に進む。ケーススタディの前後で戻れない区切りがあるので、画面の注意書きを読む。
-- Microsoft Learn の参照機能は**確認に使う**もので、ゼロから調べる時間はない。数値・パラメーター名の最終確認に限って使う。
+- **休憩を取ると、それまでの問題には戻れない。** 見直しを終えてから休憩する。
+- Microsoft Learn の参照機能は**確認に使う**もので、時間は追加されない。数値・パラメーター名の最終確認に限って使う。
 - コード問題は、まず**問われている部分（空欄・誤り）だけ**を読む。全体を読み込まない。

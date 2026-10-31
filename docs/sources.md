@@ -1,70 +1,86 @@
 # 出典と情報の確度
 
-調査日: 2026-10-31
+最終更新: 2026-10-31
 
-## 調査の方法と制約
+## 調査の方法
 
-- 調査環境のネットワーク制限により、**learn.microsoft.com（公式スタディガイド・認定ページ）を直接取得できませんでした**。
-  公式ページの内容は、(1) 検索エンジンの結果に表示された公式ページの記載、(2) 公式の文言をそのまま引用している公開リポジトリ、(3) 複数の第三者資料を照合して確認しています。
-- 技術的な数値（既定値・上限）は、可能なものは **Microsoft Learn のドキュメントのソース（GitHub の MicrosoftDocs リポジトリ）** と、**pgvector の公式 README** で直接確認しました。
-- 公式ページを開ける環境では、受験前に下記の「一次情報」を必ず確認してください。
+1. **初回の調査**: ネットワーク制限で learn.microsoft.com を直接開けなかったため、検索結果、公式の文言を引用している公開リポジトリ、GitHub 上の Microsoft Learn ドキュメントのソース（MicrosoftDocs）、pgvector の公式 README から組み立てました。
+2. **追加の検証（Microsoft Learn コネクタ）**: その後 Microsoft Learn のコネクタで公式ページを直接取得し、試験情報と技術仕様を照合して訂正しました（下記「訂正した点」）。
 
 ## 確度の目安
 
 | 表記 | 意味 |
 |---|---|
-| [公式] | 公式ドキュメント（ソースを含む）で確認、または公式ページの記載を引用する複数の資料で一致 |
+| [公式] | Microsoft Learn の公式ページ・ドキュメントで確認 |
 | [複数] | 複数の第三者資料で一致 |
 | [要確認] | 資料間で食い違う・一次情報で未確認 |
 
-## 資料間で食い違っている点
+## 公式ページで訂正・確定した点
 
-| 項目 | 内容 | 本リポジトリの扱い |
+| 項目 | 初回の記載 | 公式で確認した内容 |
 |---|---|---|
-| 試験時間 | 120 分（認定ページの記載とされる。日本語資料も 120 分）/ 100 分（一部の第三者資料） | 120 分と記載し、注記 |
-| データ管理分野の配点 | Skills at a glance: 30–35% / 詳細見出し: 25–30%（公式ガイド内の不一致。2026-10-07 の変更履歴は「増加」） | 30–35% と記載し、注記 |
-| AZ-204 の廃止日 | 2026-07-31（AZ-204 の公式スタディガイドの記載）/ 2026-08-31（一部の第三者資料） | 2026-07-31 |
-| ベータ開始 | 2026 年 5 月（多数）/ 4 月（事前の予測記事） | 5 月 |
-| 試験言語 | 英語のみ（古い資料）/ 2026 年 8 月に日本語化（受験者の報告）/ 13 言語（一部資料） | 要確認とした |
-| 公式模擬試験 | 未提供 / 提供あり | 要確認とした |
-| Cosmos DB のベクトルポリシーの変更可否 | 作成後は変更不可（ドキュメントの記載） | 変更不可として記載 |
+| データ管理分野の配点 | 30–35%（詳細見出しは 25–30%） | **25–30%**（Skills at a glance・詳細見出しとも）。変更履歴は "% of exam increased" |
+| 試験時間 | 120 分（100 分説あり） | ラボなしのアソシエイト試験は **100 分（着席 120 分）**、ラボが含まれうる試験は 120 分（着席 140 分）。ラボのある試験は非公表で、申し込み時に時間が表示される |
+| 公式模擬試験 | 要確認 | **あり**（AI Skills Navigator の Practice Assessment） |
+| AZ-204 の廃止日 | 2026-07-31（有力） | **2026-07-31 23:59 CST** で確定 |
+| 公式コース | AI-200T00 | AZ-204T00 は 2026-05-29 に廃止、後継が **AI-200T00** |
+| Container Apps の Key Vault 参照 | 更新は手動で再起動が必要 | **バージョンなしの参照は 30 分以内に自動で取得し、参照しているリビジョンを自動再起動**（直接入力したシークレットは手動） |
+| Cosmos DB のベクトルポリシー | 作成後は変更不可 | 設定の直接変更は不可だが、**削除して追加し直せる**。パスの追加・削除は可 |
+| Cosmos DB のデータ型 | float32 / int8 / uint8 | **float16 も対応**。次元数の既定は 1536 |
+| Cosmos DB の制限 | — | **共有スループットのアカウントではベクトル検索不可**、1,000 件未満は全件スキャン、一度有効にすると無効化不可 |
+| PgBouncer | — | **Burstable 層では使えない**。既定: transaction / pool 50 / client 5000。再起動不要 |
+| Azure Managed Redis のスケール | スケールダウン不可 | 条件付きで**スケールダウン可**。Flash ↔ in-memory 間は不可。クラスタリングポリシーは原則変更不可 |
+| Redis の追い出しポリシーの既定 | — | **volatile-lru** |
+| Key Vault の論理的な削除 | 常に有効 | 既定で有効・無効化不可、保持期間は**作成時のみ設定可**。消去保護は**既定で無効** |
+| OpenTelemetry のサンプリング | — | 既定はレート制限 **5 トレース / 秒**。メトリックはサンプリングされない |
+
+## まだ確認できていない点
+
+| 項目 | 状況 |
+|---|---|
+| 日本語での受験 | 受験者の報告（2026 年 8 月に日本語化）はあるが、公式ページに言語一覧がない。申し込み画面で確認 |
+| 受験料（日本円） | 米国は USD 165。日本の価格は申し込み画面で確認 |
+| AI-200 のラーニングパス名 | 第三者の整理に基づく。Microsoft Learn の検索ではまだ確認できていない |
+| ベータ開始 / GA の正確な日付 | 第三者資料では 2026 年 5 月にベータ、7 月に GA |
 
 ## 一次情報（Microsoft）
 
 - [Study guide for Exam AI-200: Developing AI Cloud Solutions on Azure](https://learn.microsoft.com/credentials/certifications/resources/study-guides/ai-200)
 - [Microsoft Certified: Azure AI Cloud Developer Associate](https://learn.microsoft.com/credentials/certifications/azure-ai-cloud-developer-associate/)
-- [Study guide for Exam AZ-204（廃止のお知らせを含む）](https://learn.microsoft.com/credentials/certifications/resources/study-guides/az-204)
-- [Renew your Microsoft Certification FAQ](https://learn.microsoft.com/credentials/certifications/renew-your-microsoft-certification-faq)
-- Microsoft Learn ラーニングパス（AI-200T00）: 本リポジトリの [01-skills-outline.md](01-skills-outline.md) の対応表を参照
+- [AI-200 Practice Assessment（AI Skills Navigator）](http://aka.ms/AI200-PA)
+- [Exam Readiness Zone（AI-200）](https://aka.ms/AI200-ExamPrep)
+- [Study guide for Exam AZ-204（廃止のお知らせと最終版の出題範囲）](https://learn.microsoft.com/credentials/certifications/resources/study-guides/az-204)
+- [Exam duration and exam experience](https://learn.microsoft.com/credentials/support/exam-duration-exam-experience)
+- [Exam retake policies](https://learn.microsoft.com/credentials/support/retake-policy)
+- [Renew your Microsoft Certification](https://learn.microsoft.com/credentials/certifications/renew-your-microsoft-certification)
+- [Retired courses（AZ-204T00 → AI-200T00）](https://learn.microsoft.com/credentials/certifications/retired-courses)
+- [Exam sandbox](https://aka.ms/examdemo)
 
-## 技術仕様の確認に使った公式ドキュメント（ソース）
+## 技術仕様の確認に使った公式ドキュメント
 
-| トピック | ドキュメント（MicrosoftDocs/azure-docs ほか） |
+| トピック | ドキュメント |
 |---|---|
-| Container Apps のスケール | `articles/container-apps/scale-app.md` |
-| Container Apps のリビジョン | `articles/container-apps/revisions.md` |
-| Container Apps のシークレット | `articles/container-apps/manage-secrets.md` |
-| ACR の SKU / Tasks | `MicrosoftDocs/azure-management-docs`: `container-registry-skus.md`、`container-registry-tasks-overview.md` |
-| Functions のホスティング | `articles/azure-functions/functions-scale.md` |
-| Functions の Service Bus バインド | `articles/azure-functions/functions-bindings-service-bus.md` |
-| Service Bus のクォータ・DLQ・ロック・フィルター・重複検出 | `articles/service-bus-messaging/`（`service-bus-quotas.md`、`service-bus-dead-letter-queues.md`、`message-transfers-locks-settlement.md`、`topic-filters.md`、`duplicate-detection.md`） |
-| Event Grid の再試行・フィルター | `articles/event-grid/delivery-and-retry.md`、`event-filtering.md` |
-| App Configuration | `articles/azure-app-configuration/`（動的構成、Key Vault 参照、機能管理） |
-| OpenTelemetry | `MicrosoftDocs/azure-monitor-docs`: `articles/azure-monitor/app/opentelemetry-enable.md` |
-| pgvector | [pgvector/pgvector README](https://github.com/pgvector/pgvector) |
-| Cosmos DB のベクトルインデックス | [Index vector data](https://learn.microsoft.com/azure/cosmos-db/index-vector-data)、[Vector search performance tips](https://learn.microsoft.com/azure/cosmos-db/gen-ai/vector-search-performance-tips)（検索結果の抜粋で確認） |
-| Azure Managed Redis | [Vector similarity overview](https://learn.microsoft.com/azure/redis/overview-vector-similarity)、[Architecture](https://learn.microsoft.com/azure/redis/architecture)、[Semantic cache tutorial](https://learn.microsoft.com/azure/redis/tutorial-semantic-cache)（検索結果の抜粋で確認） |
+| Container Apps | [Scale rules](https://learn.microsoft.com/azure/container-apps/scale-app)、[Revisions](https://learn.microsoft.com/azure/container-apps/revisions)、[Manage secrets](https://learn.microsoft.com/azure/container-apps/manage-secrets)、[Troubleshoot deployment failures](https://learn.microsoft.com/azure/container-apps/troubleshoot-deployment-errors) |
+| ACR | [Service tiers](https://learn.microsoft.com/azure/container-registry/container-registry-skus)、[ACR Tasks](https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview) |
+| App Service | [Key Vault references](https://learn.microsoft.com/azure/app-service/app-service-key-vault-references) |
+| Cosmos DB | [Vector search in Azure Cosmos DB for NoSQL](https://learn.microsoft.com/azure/cosmos-db/vector-search) |
+| PostgreSQL | [PgBouncer](https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer)、[Connection pooling best practices](https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices)、[azure_ai extension](https://learn.microsoft.com/azure/postgresql/azure-ai/generative-ai-azure-overview)、[pgvector README](https://github.com/pgvector/pgvector) |
+| Azure Managed Redis | [Redis modules](https://learn.microsoft.com/azure/redis/redis-modules)、[Choose a tier](https://learn.microsoft.com/azure/redis/plan-tiers-and-capacity)、[Memory management](https://learn.microsoft.com/azure/redis/best-practices-memory-management)、[Azure Cache for Redis の更新情報（廃止日）](https://learn.microsoft.com/azure/azure-cache-for-redis/cache-whats-new) |
+| Functions | [Hosting options](https://learn.microsoft.com/azure/azure-functions/functions-scale)、[Service Bus bindings](https://learn.microsoft.com/azure/azure-functions/functions-bindings-service-bus) |
+| Service Bus | [Quotas](https://learn.microsoft.com/azure/service-bus-messaging/service-bus-quotas)、[Dead-letter queues](https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues)、[Locks and settlement](https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement)、[Topic filters](https://learn.microsoft.com/azure/service-bus-messaging/topic-filters)、[Duplicate detection](https://learn.microsoft.com/azure/service-bus-messaging/duplicate-detection) |
+| Event Grid | [Delivery and retry](https://learn.microsoft.com/azure/event-grid/delivery-and-retry)、[Event filtering](https://learn.microsoft.com/azure/event-grid/event-filtering) |
+| Key Vault | [Soft-delete overview](https://learn.microsoft.com/azure/key-vault/general/soft-delete-overview)、[Recovery management](https://learn.microsoft.com/azure/key-vault/general/key-vault-recovery)、[Secret rotation tutorial](https://learn.microsoft.com/azure/key-vault/secrets/tutorial-rotation) |
+| App Configuration | [Dynamic configuration in Python](https://learn.microsoft.com/azure/azure-app-configuration/enable-dynamic-configuration-python)、[Key Vault references](https://learn.microsoft.com/azure/azure-app-configuration/use-key-vault-references-dotnet-core)、[Feature management](https://learn.microsoft.com/azure/azure-app-configuration/concept-feature-management) |
+| OpenTelemetry | [Enable OpenTelemetry](https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable)、[Configure OpenTelemetry（sampling）](https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration)、[azure-monitor-opentelemetry（Python）](https://learn.microsoft.com/python/api/overview/azure/monitor-opentelemetry-readme) |
 
 ## 第三者の学習資料（参考）
 
 公式ではないため、内容は一次情報と照合して使ってください。
 
-- [Suralmk/learn-AI-200](https://github.com/Suralmk/learn-AI-200)（AI-200 Learn。公式の 2026-10-07 版の文言をそのまま引用した出題範囲と、9 本のラーニングパスの構成）
-- [MO2k4/azure-developer-associate](https://github.com/MO2k4/azure-developer-associate)（AZ-204 から AI-200 への移行の分析）
+- [Suralmk/learn-AI-200](https://github.com/Suralmk/learn-AI-200)（出題範囲とラーニングパスの整理）
+- [MO2k4/azure-developer-associate](https://github.com/MO2k4/azure-developer-associate)（AZ-204 から AI-200 への移行の分析。AZ-204 の廃止日を 8/31 としている点は誤り）
 - [DEV Community: Bye AZ-204, hello AI-200](https://dev.to/lovelacecoding/bye-az-204-hello-ai-200-what-you-need-to-know-about-the-new-azure-developer-certification-2lo)
 - [DEV Community: AZ-204 Retired: AI-200 Study Guide](https://dev.to/epifive/az-204-retired-ai-200-study-guide-for-azure-ai-cloud-developers-1aa0)
-- [Whizlabs: AI-200 Study Guide](https://www.whizlabs.com/blog/ai-200-study-guide/)
-- [open-exam-prep: AI-200 Study Guide 2026](https://open-exam-prep.com/blog/ai-200-study-guide-2026-four-domain-lab-plan)
 - [mscertquiz: AI-103 vs AI-200](https://mscertquiz.com/blog/ai-103-vs-ai-200-beta-to-ga-explained)
 
 ### 日本語の合格体験記

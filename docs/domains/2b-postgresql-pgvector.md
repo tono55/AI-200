@@ -1,6 +1,6 @@
 # 分野 2-b: Develop AI solutions by using Azure Database for PostgreSQL
 
-> 分野 2 全体の配点: 30–35%（詳細見出しは 25–30%）
+> 分野 2 全体の配点: 25–30%（4 分野で最大）
 > 対応する公式項目: 2.5〜2.10 / Learn ラーニングパス: #5 Develop AI solutions with Azure Database for PostgreSQL
 > **項目数が 6 つと最も多いトピック**です。AZ-204 にはなかった新範囲なので重点的に。
 
@@ -157,7 +157,9 @@ LIMIT 5;
 | 項目 | 内容 |
 |---|---|
 | なぜ必要か | PostgreSQL は**1 接続 = 1 プロセス**。接続の確立は重く、接続数が多いとメモリを圧迫する。`max_connections` は SKU で上限がある |
-| **組み込み PgBouncer** | サーバーパラメーター **`pgbouncer.enabled = true`** で有効化。アプリは**ポート 6432** に接続（直接接続は 5432）。プールモードの既定は **transaction** |
+| **組み込み PgBouncer** | サーバーパラメーター **`pgbouncer.enabled = true`** で有効化（**再起動不要**）。アプリは同じホスト名で**ポート 6432** に接続（直接接続は 5432）。**General Purpose / Memory Optimized 層のみ（Burstable では使えない）**。Entra 認証に対応。HA 構成ではフェールオーバー後も接続文字列はそのまま |
+| PgBouncer の主なパラメーター | `pgbouncer.pool_mode`（既定 **transaction**。組み込み版の既定で、OSS 版の既定は session）/ `pgbouncer.default_pool_size`（ユーザー・DB の組ごとのサーバー接続数、既定 **50**）/ `pgbouncer.max_client_conn`（既定 **5000**）/ `pgbouncer.max_prepared_statements`（既定 0。0 以外にすると transaction モードでも名前付きプリペアドステートメントを追跡） |
+| エラスティッククラスター | 6432 はコーディネーターノードの PgBouncer、**8432** はワーカーノードの PgBouncer |
 | トランザクションプーリングの注意 | 接続がトランザクションごとに使い回されるので、**セッション単位の `SET`（例: `SET hnsw.ef_search`）や一時テーブル、名前付きプリペアドステートメントが引き継がれない**。`SET LOCAL` をトランザクション内で使う |
 | アプリ側のプール | `psycopg_pool.ConnectionPool`、SQLAlchemy のプールなど。**接続をリクエストごとに作らない** |
 | 遅延を減らす | アプリと DB を**同じリージョン**（可能なら同じゾーン）に。プライベートネットワーク。往復回数を減らす（バッチ挿入、`COPY`、`executemany`） |
@@ -306,7 +308,7 @@ WHERE embedding IS NULL;
 | 検索の精度をもう少し上げたい（IVFFlat） | `ivfflat.probes` を上げる |
 | 稼働中のテーブルに書き込みを止めずにインデックスを追加 | `CREATE INDEX CONCURRENTLY` |
 | インデックス作成が遅い | `maintenance_work_mem` を増やす、並列ワーカー |
-| 接続数が上限に達する（サーバーレス関数から大量接続） | **組み込み PgBouncer（6432）** ＋アプリ側プール |
+| 接続数が上限に達する（サーバーレス関数から大量接続） | **組み込み PgBouncer（6432）** ＋アプリ側プール（Burstable なら General Purpose 以上に変更が必要） |
 | PgBouncer 経由で `SET hnsw.ef_search` が効かない | トランザクション内で `SET LOCAL` |
 | パスワードを使わずにアプリから接続 | Microsoft Entra 認証（マネージド ID のトークンをパスワードとして使用） |
 | 検索の読み取り負荷を主サーバーから分離 | 読み取りレプリカ |
@@ -323,6 +325,8 @@ WHERE embedding IS NULL;
 - 近似インデックスは**フィルターを後から適用**する。
 - 拡張機能は `azure.extensions` の許可リストに入れないと `CREATE EXTENSION` できない。
 - PgBouncer のポートは **6432**、PostgreSQL は **5432**。
+- 組み込み PgBouncer は **Burstable 層では使えない**。有効化に再起動は不要。
+- 組み込み PgBouncer の既定のプールモードは **transaction**（プリペアドトランザクションは使えない）。
 - Entra のトークンは約 1 時間で切れる。プールの**接続作成時に再取得**する。
 - `ORDER BY ... LIMIT` がないとベクトルインデックスは使われない。
 
@@ -345,7 +349,7 @@ WHERE embedding IS NULL;
 
 <details><summary>Q4. Azure Functions から PostgreSQL に接続しているが、負荷が高いと「too many connections」になる。最小の変更での対処は？</summary>
 
-**答え**: 組み込み PgBouncer を有効にし（`pgbouncer.enabled = true`）、接続先ポートを 6432 に変える。アプリ側でも接続を使い回す。
+**答え**: 組み込み PgBouncer を有効にし（`pgbouncer.enabled = true`、再起動不要）、接続先ポートを 6432 に変える。アプリ側でも接続を使い回す。サーバーが Burstable 層なら PgBouncer は使えないので、General Purpose 以上にする。
 </details>
 
 <details><summary>Q5. PgBouncer 経由にしたら、`SET hnsw.ef_search = 200` の設定が効いたり効かなかったりする。なぜか。</summary>

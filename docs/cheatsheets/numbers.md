@@ -7,9 +7,13 @@
 | 項目 | 値 |
 |---|---|
 | 合格点 | 700 / 1000 |
-| 試験時間 | 120 分（100 分とする資料もある） |
-| 配点 | コンテナ 20–25 / **データ 30–35** / サービス接続 20–25 / セキュリティ・監視 20–25 |
+| 試験時間 | **100 分**（着席 120 分）。ラボがある回は 120 分（着席 140 分） |
+| 問題数 | 通常 40〜60 問 |
+| 配点 | コンテナ 20–25 / **データ 25–30** / サービス接続 20–25 / セキュリティ・監視 20–25 |
 | 公式項目数 | 27 |
+| 試験時間に含まれる休憩 | 5 分（タイマーは止まらない。休憩後は前の問題に戻れない） |
+| 母語でない言語で受験 | +30 分を申請できる |
+| 再受験 | 1 回目の後 24 時間、以降 14 日。12 か月で最大 5 回 |
 
 ## コンテナ
 
@@ -25,6 +29,8 @@
 | AKS ローリング更新の既定 | `maxSurge 25%` / `maxUnavailable 25%` |
 | App Service コンテナの起動待ち（既定 / 最大） | 230 秒 / 1800 秒 |
 | App Service の Key Vault 参照（バージョンなし）の更新 | 24 時間以内 |
+| Container Apps の Key Vault 参照（バージョンなし）の更新 | **30 分以内**（参照しているリビジョンを自動再起動） |
+| RBAC 割り当ての反映 | 最大 10 分程度 |
 | ACR のトリガー既定 | コミット: 有効 / PR: **無効** / ベースイメージ: 有効 |
 | OOMKilled の終了コード | 137 |
 
@@ -41,9 +47,12 @@
 | 読み取り RU が 2 倍 | Strong / Bounded staleness |
 | `flat` の最大次元 | **505** |
 | `quantizedFlat` / `diskANN` の最大次元 | **4,096** |
-| `quantizedFlat` と `diskANN` の目安の境界 | 物理パーティションあたり約 **5 万**ベクトル |
+| `quantizedFlat` と `diskANN` の目安の境界 | 検索対象が約 **5 万**ベクトル |
+| `quantizedFlat` / `diskANN` が量子化される最小件数 | **1,000** 件（未満は全件スキャン） |
 | 距離関数の既定 | `cosine` |
-| データ型の既定 | `float32` |
+| データ型 / 既定 | `float32`（既定）/ `float16` / `int8` / `uint8` |
+| 次元数の既定 | 1536 |
+| ベクトル検索機能の有効化の反映 | 最大 15 分 |
 
 ## PostgreSQL / pgvector
 
@@ -60,7 +69,9 @@
 | IVFFlat `lists` の目安 | 100 万行まで `行数/1000`、それ以上 `sqrt(行数)` |
 | `probes` の目安 | `sqrt(lists)` |
 | PostgreSQL のポート | **5432** |
-| 組み込み PgBouncer のポート | **6432** |
+| 組み込み PgBouncer のポート | **6432**（エラスティッククラスターのワーカーは 8432） |
+| PgBouncer の対応層 | General Purpose / Memory Optimized（**Burstable は不可**） |
+| PgBouncer の既定 | `pool_mode` transaction / `default_pool_size` 50 / `max_client_conn` 5000 |
 | Entra トークンの有効期間 | 約 1 時間 |
 
 ## Azure Managed Redis
@@ -70,7 +81,10 @@
 | TLS ポート | **10000**（Azure Cache for Redis は 6380） |
 | メモリ : vCPU | Memory Optimized **8:1** / Balanced **4:1** / Compute Optimized **2:1** |
 | 非クラスターの上限 | **25 GB** |
+| 追い出しポリシーの既定 | `volatile-lru`（RediSearch 使用時は `NoEviction` 必須） |
 | `TTL` の戻り値 | -1 = 期限なし / -2 = キーなし |
+| Used Memory Percentage の目安 | 常に 75% 超ならスケールアップ |
+| Azure Cache for Redis（Basic/Standard/Premium）の廃止 | 2028-09-30 |
 
 ## Service Bus
 
@@ -120,8 +134,9 @@
 
 | 項目 | 値 |
 |---|---|
-| 論理的な削除の保持期間 | **7〜90 日（既定 90）** |
-| 消去保護 | 一度有効にすると**無効にできない** |
+| 論理的な削除の保持期間 | **7〜90 日（既定 90）**。作成時のみ設定可 |
+| 消去保護 | **既定は無効**。一度有効にすると**無効にできない** |
+| OpenTelemetry ディストロの既定サンプリング | レート制限・**5 トレース / 秒**（メトリックはサンプリングされない） |
 | `SecretNearExpiry` イベント | 期限の **30 日前** |
 | App Configuration のリフレッシュ間隔（既定） | **30 秒** |
 | 機能フラグのキーのプレフィックス | `.appconfig.featureflag/` |

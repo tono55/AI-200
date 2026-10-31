@@ -1,6 +1,6 @@
 # 分野 2-a: Develop AI solutions by using Azure Cosmos DB for NoSQL
 
-> 分野 2 全体の配点: 30–35%（詳細見出しは 25–30%）
+> 分野 2 全体の配点: 25–30%（4 分野で最大）
 > 対応する公式項目: 2.1〜2.4 / Learn ラーニングパス: #4 Develop AI solutions with Azure Cosmos DB for NoSQL
 
 ## 0. 出題範囲
@@ -120,23 +120,28 @@ OFFSET 0 LIMIT 20
 
 | プロパティ | 値 |
 |---|---|
-| `path` | 埋め込みを入れるプロパティ（例: `/embedding`） |
-| `dataType` | `float32`（既定）/ `int8` / `uint8` など |
-| `dimensions` | ベクトルの次元数（例: `text-embedding-3-small` なら 1536） |
-| `distanceFunction` | `cosine`（既定）/ `dotproduct` / `euclidean` |
+| `path` | 埋め込みを入れるプロパティ（例: `/embedding`）。必須。ワイルドカードや配列の中のパスは不可 |
+| `dataType` | `float32`（既定）/ **`float16`**（ストレージ約 50% 削減、精度は少し下がる）/ `int8` / `uint8` |
+| `dimensions` | ベクトルの次元数（**既定 1536**。例: `text-embedding-3-small` なら 1536） |
+| `distanceFunction` | `cosine`（既定。-1〜+1、大きいほど似ている）/ `dotproduct`（大きいほど似ている）/ `euclidean`（0 が最も似ている） |
 
 2. **インデックスポリシーのベクトルインデックス**（`indexingPolicy.vectorIndexes`）
 
 | 種類 | 探索方法 | 最大次元 | 向いている規模 |
 |---|---|---|---|
-| `flat` | 総当たり（**正確**、リコール 100%） | **505** | ごく小規模 |
-| `quantizedFlat` | 圧縮したベクトルを総当たり（ほぼ正確） | **4,096** | 物理パーティションあたり**約 5 万ベクトル以下** |
-| **`diskANN`** | DiskANN による近似最近傍（**高速・低 RU**） | **4,096** | 物理パーティションあたり **5 万ベクトル超** |
+| `flat` | 総当たり（**正確**、リコール 100%） | **505** | ごく小規模、フィルターやパーティションキーで範囲を絞る検索 |
+| `quantizedFlat` | 圧縮（量子化）したベクトルを総当たり（ほぼ正確） | **4,096** | 検索対象が**約 5 万ベクトル以下** |
+| **`diskANN`** | DiskANN による近似最近傍（**高速・低 RU**） | **4,096** | 検索対象が **5 万ベクトル超** |
 
 - 埋め込みのパスは**通常のインデックスから除外**（`excludedPaths` に `/embedding/*`）する。除外しないと書き込み RU が大きく増える。
-- ベクトルポリシーとベクトルインデックスは**作成後に変更できない**とされている（変えるなら新しいコンテナを作って移行）。
-- アカウント側でベクトル検索の機能（`EnableNoSQLVectorSearch`）を有効にしておく必要がある。
-- `quantizedFlat` / `diskANN` は一定数（約 1,000 件）のベクトルが入るまでは量子化されず、総当たりで動く。
+- **既存のポリシーの設定は直接変更できない。** パスの追加・削除はできるが、設定を変えるには**いったんベクトルポリシー / インデックスを削除してから新しい設定で追加**する。
+- コンテナでベクトルのインデックスと検索を**一度有効にすると無効にできない**。
+- アカウント側でベクトル検索の機能を有効にする必要がある（ポータルの **Features → Vector Search for NoSQL API**、または `az cosmosdb update --capabilities EnableNoSQLVectorSearch`。自動承認だが反映まで最大 15 分）。
+- **共有スループット（データベース単位の RU）のアカウントでは、ベクトルのインデックスと検索は使えない。**
+- `quantizedFlat` / `diskANN` は **1,000 件以上**のベクトルが入るまでは量子化されず、全件スキャンになる（RU が高くなる）。
+- 量子化の方式は `quantizerType` で選ぶ: `product`（既定）/ `spherical`（インデックス作成が速く、高次元でリコールが安定）。
+- `diskANN` は近似なので、同じクエリでも結果や順序が少し変わることがある。クエリごとに `VectorDistance` のオプション `searchListSizeMultiplier` を上げるとリコールが上がる（遅延と RU は増える）。
+- 短時間の大量投入（500 万ベクトル超など）はインデックス作成に時間がかかるので、投入ペースを抑える。
 
 **クエリ: `VectorDistance()`**
 
@@ -149,6 +154,7 @@ ORDER BY VectorDistance(c.embedding, @queryVector)        -- 類似度順
 
 - **必ず `TOP n` を付ける**（付けないと全件を評価して RU が非常に大きくなる）。
 - `ORDER BY VectorDistance(...)` は**似ている順**に並ぶ（cosine / dotproduct は値が大きいほど似ている、euclidean は小さいほど似ている。並び順は自動で正しくなる）。
+- `WHERE` で使える通常のフィルターやインデックスとすべて組み合わせられる。
 - `WHERE` でパーティションキーを指定すると、検索が 1 パーティションに絞られ RU が下がる。
 - 総当たりを強制したい場合は `VectorDistance(c.embedding, @q, true)`。
 - **ハイブリッド検索**: フルテキストポリシーとインデックスを定義し、`ORDER BY RANK RRF(VectorDistance(c.embedding, @q), FullTextScore(c.text, @keywords))` で、ベクトルとキーワードの順位を **RRF（Reciprocal Rank Fusion）** で統合する。
@@ -311,6 +317,9 @@ def refresh_embeddings(docs: func.DocumentList):
 | 数百万ベクトル、低遅延・低 RU の近似検索 | `diskANN` |
 | 数千〜数万ベクトルで正確に近い結果が欲しい | `quantizedFlat`（ごく少数・低次元なら `flat`） |
 | 3072 次元の埋め込みを使いたい | `quantizedFlat` か `diskANN`（`flat` は 505 次元まで） |
+| 埋め込みのストレージを半分にしたい（少しの精度低下は許容） | `dataType: float16` |
+| データベース単位の共有 RU で運用しているが、ベクトル検索を追加したい | 共有スループットでは使えない → コンテナ単位（専用）スループットのコンテナを用意 |
+| diskANN のリコールをクエリ単位で上げたい | `VectorDistance` の `searchListSizeMultiplier` を上げる |
 | キーワード一致と意味の近さを両方使う | フルテキスト＋ベクトルのハイブリッド検索（`RRF`） |
 | テナントごとに検索範囲を限定 | パーティションキーをテナント ID にし、`WHERE` で指定 |
 | 文書の更新をトリガーに埋め込みを更新 | 変更フィード（Functions の Cosmos DB トリガー、または変更フィードプロセッサ） |
@@ -322,6 +331,9 @@ def refresh_embeddings(docs: func.DocumentList):
 ## 5. ひっかけポイント
 
 - **パーティションキーは後から変更できない。**
+- **共有スループット（データベース単位の RU）ではベクトル検索を使えない。**
+- ベクトルポリシーの設定は直接変更できない（削除してから追加し直す）。コンテナのベクトル検索は一度有効にすると無効にできない。
+- `quantizedFlat` / `diskANN` は 1,000 件未満だと全件スキャン。
 - `VectorDistance` の検索に **`TOP` を付け忘れると高コスト**。
 - 埋め込みのパスを `excludedPaths` に入れ忘れると、書き込みのたびに巨大な配列がインデックスされる。
 - `flat` の最大次元は **505**。1536 次元の埋め込みには使えない。
@@ -385,7 +397,8 @@ def refresh_embeddings(docs: func.DocumentList):
 - [ ] パラメーター化クエリを書ける
 - [ ] `excludedPaths` と複合インデックスの効果を説明できる
 - [ ] 5 つの整合性レベルと既定（Session）、2 倍コストのレベルを言える
-- [ ] ベクトル埋め込みポリシーの 4 項目（path / dataType / dimensions / distanceFunction）を書ける
+- [ ] ベクトル埋め込みポリシーの 4 項目（path / dataType / dimensions / distanceFunction）と、その選択肢・既定値を書ける
+- [ ] ベクトル検索の制限（共有スループット不可、1,000 件未満は全件スキャン、一度有効にすると無効化不可）を言える
 - [ ] `flat` / `quantizedFlat` / `diskANN` の違いと次元の上限を言える
 - [ ] `TOP` 付きの `VectorDistance` クエリとフィルターを書ける
 - [ ] ハイブリッド検索（RRF）の仕組みを説明できる

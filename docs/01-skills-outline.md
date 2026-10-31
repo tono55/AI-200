@@ -4,7 +4,9 @@
 **ID** はこのリポジトリ内での呼び名で、各分野ノートの見出しと対応しています。
 
 > 出典: [Study guide for Exam AI-200](https://learn.microsoft.com/credentials/certifications/resources/study-guides/ai-200)（Skills measured as of October 7, 2026）。
-> この環境から公式ページを直接取得できなかったため、公式の文言をそのまま引用している公開リポジトリ（AI-200 Learn）と、複数の検索結果で照合しました。
+> 2026-10-31 に Microsoft Learn から公式ページを取得し、原文が一致することを確認済み。
+>
+> 公式の注記: 各項目の箇条書きは「どう評価するか」を示す例で、関連するトピックも出題されることがある。ほとんどは GA の機能だが、よく使われるプレビュー機能も出ることがある。
 
 ---
 
@@ -31,11 +33,11 @@
 
 ---
 
-## 分野 2: Develop AI solutions by using Azure data management services（30–35%）
+## 分野 2: Develop AI solutions by using Azure data management services（25–30%）
 
 → 学習ノート: [2a-cosmos-db.md](domains/2a-cosmos-db.md) / [2b-postgresql-pgvector.md](domains/2b-postgresql-pgvector.md) / [2c-managed-redis.md](domains/2c-managed-redis.md)
 
-> 2026-10-07 の改訂で「% of exam increased」。Skills at a glance は 30–35%、詳細見出しは 25–30% と食い違っています。
+> 2026-10-07 の改訂の変更履歴は「% of exam increased」（3 つのサブグループの項目自体は変更なし）。改訂直後は Skills at a glance が 30–35% と表記されていましたが、2026-10-31 時点ではどちらも 25–30% です。
 
 ### Develop AI solutions by using Azure Cosmos DB for NoSQL
 
@@ -108,8 +110,11 @@
 
 ## 公式ラーニングパス（AI-200T00）との対応
 
-Microsoft Learn の公式ラーニングパス 9 本と、その中のモジュールです。
+AI-200T00 に対応する Microsoft Learn のラーニングパス 9 本と、その中のモジュールです。
 **Skills measured の文言とモジュール名がほぼ一致している**ので、Learn のモジュールを順に読めば範囲を一通りカバーできます。
+
+> この表は第三者の学習サイト（AI-200 Learn）の整理に基づきます。Microsoft Learn の検索ではこれらのパス名をまだ確認できなかったため、名前が変わっている可能性があります。
+> 公式のスタディガイドの「Get trained」リンクから最新のラーニングパスを確認してください。
 
 | # | ラーニングパス | モジュール | 対応 ID |
 |---|---|---|---|

@@ -93,7 +93,7 @@
 | **アプリ設定 → 環境変数** | アプリ設定はコンテナに**環境変数として渡される** |
 | 接続文字列 | 種類に応じたプレフィックス付きの環境変数になる（例: `CUSTOMCONNSTR_`, `SQLAZURECONNSTR_`, `POSTGRESQLCONNSTR_`） |
 | スロット設定 | 「デプロイ スロットの設定」にチェックした設定はスロットに固定され、スワップで入れ替わらない |
-| **Key Vault 参照** | 値を `@Microsoft.KeyVault(SecretUri=https://<kv>.vault.azure.net/secrets/<name>/)` または `@Microsoft.KeyVault(VaultName=<kv>;SecretName=<name>)` にする。アプリのマネージド ID に `Key Vault Secrets User` が必要。**バージョンを省略すると 24 時間以内に最新版へ自動更新** |
+| **Key Vault 参照** | 値を `@Microsoft.KeyVault(SecretUri=https://<kv>.vault.azure.net/secrets/<name>)` または `@Microsoft.KeyVault(VaultName=<kv>;SecretName=<name>)` にする。アプリのマネージド ID に `Key Vault Secrets User` が必要（ユーザー割り当て ID を使うなら `keyVaultReferenceIdentity` を設定）。**バージョンを省略すると 24 時間以内に最新版へ自動更新**（App Service が値を 24 時間キャッシュするため）。アプリの構成を変更すると再起動して即座に再取得。すぐ反映したいときは `config/configreferences/appsettings/refresh` API を POST。解決できないと参照文字列そのものが値になる |
 | ポート | 80 / 8080 以外で待ち受ける場合は `WEBSITES_PORT` を設定 |
 | 永続ストレージ | `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` で `/home` を永続化（カスタムコンテナでは既定 false） |
 | 起動待ち時間 | `WEBSITES_CONTAINER_START_TIME_LIMIT`（既定 230 秒、最大 1800 秒） |
@@ -123,7 +123,8 @@
 | イメージ、環境変数、CPU / メモリ、スケールルール、プローブ、コンテナの追加 | **リビジョンスコープ**（`properties.template`） | **作られる** |
 | **シークレット**、イングレス、レジストリの資格情報、リビジョンモード、Dapr の設定 | **アプリケーションスコープ**（`properties.configuration`） | **作られない** |
 
-> **シークレットを変更しても既存のリビジョンには反映されない。** 反映するには**新しいリビジョンをデプロイする**か、**既存リビジョンを再起動**する。
+> **アプリのシークレットを直接変更しても、既存のリビジョンには反映されない。** 反映するには**新しいリビジョンをデプロイする**か、**既存リビジョンを再起動**する。
+> 例外: **バージョンなしの Key Vault 参照**のシークレットは、Key Vault に新しいバージョンができると **30 分以内に自動で取得され、そのシークレットを環境変数で参照しているアクティブなリビジョンが自動で再起動**される。
 
 **リビジョンモード**
 
@@ -139,7 +140,9 @@
 **シークレット**
 
 - アプリケーションスコープで定義し、環境変数から `secretref:<名前>` で参照。
-- 本番では値を直接書かず **Key Vault 参照**: `--secrets "db-pass=keyvaultref:<シークレットURI>,identityref:<ID または system>"`。マネージド ID に `Key Vault Secrets User` が必要。
+- 本番では値を直接書かず **Key Vault 参照**: `--secrets "db-pass=keyvaultref:<シークレットURI>,identityref:<ID または system>"`。マネージド ID に `Key Vault Secrets User` が必要。URI にバージョンを付けなければ最新版を使い（30 分以内に更新を検知）、付ければそのバージョンに固定される。
+- `secretRef` の名前は**大文字小文字を区別して**シークレット名と完全一致させる（一致しないと環境変数が空になる）。
+- RBAC の割り当てが反映されるまで最大 10 分ほどかかることがある。
 - シークレットをボリュームとしてマウントすることもできる。
 
 ### 2.5 KEDA によるスケーリング（1.5）
@@ -281,7 +284,7 @@ az webapp config set -g rg-ai200 -n app-ai200 --generic-configurations '{"acrUse
 az webapp config appsettings set -g rg-ai200 -n app-ai200 --settings \
   WEBSITES_PORT=8000 \
   OPENAI_ENDPOINT=https://example.openai.azure.com/ \
-  DB_PASSWORD="@Microsoft.KeyVault(SecretUri=https://kv-ai200.vault.azure.net/secrets/db-password/)"
+  DB_PASSWORD="@Microsoft.KeyVault(SecretUri=https://kv-ai200.vault.azure.net/secrets/db-password)"
 
 # ログ
 az webapp log config -g rg-ai200 -n app-ai200 --docker-container-logging filesystem
@@ -464,7 +467,7 @@ kubectl top pod                               # CPU / メモリ（metrics-server
 
 ## 5. ひっかけポイント
 
-- **Container Apps でシークレットを更新しても新しいリビジョンは作られない。** 既存リビジョンに反映するには再起動か新リビジョンのデプロイが必要。
+- **Container Apps でシークレットを更新しても新しいリビジョンは作られない。** 直接値を入れたシークレットを既存リビジョンに反映するには再起動か新リビジョンのデプロイが必要（バージョンなしの Key Vault 参照は 30 分以内に自動更新＋自動再起動）。
 - 環境変数の変更は**リビジョンスコープ**なので新しいリビジョンが作られる（シークレットとの違い）。
 - KEDA のクールダウン（300 秒）は**最後の 1 つから 0 にするときだけ**。
 - Container Apps の最大レプリカの既定は 10。高負荷シナリオで「10 で頭打ち」になっていたら `maxReplicas` を上げる。
@@ -485,9 +488,10 @@ kubectl top pod                               # CPU / メモリ（metrics-server
 **解説**: クイックタスクはソースをアップロードし、Azure 上でビルドしてプッシュする。`docker build` + `docker push` は Docker が必要。
 </details>
 
-<details><summary>Q2. Container Apps で Key Vault 参照のシークレットの値を Key Vault 側で更新した。アプリの環境変数に反映されない。なぜか、どうするか。</summary>
+<details><summary>Q2. Container Apps で `az containerapp secret set` によりシークレットの値（直接入力）を更新した。アプリの環境変数に反映されない。なぜか、どうするか。</summary>
 
-**答え**: シークレットはアプリケーションスコープで、既存のリビジョンには自動で反映されないため。リビジョンを再起動するか、新しいリビジョンをデプロイする。
+**答え**: シークレットはアプリケーションスコープで、更新しても新しいリビジョンは作られず、既存のリビジョンにも自動では反映されないため。リビジョンを再起動（`az containerapp revision restart`）するか、新しいリビジョンをデプロイする。
+**補足**: バージョンなしの Key Vault 参照なら、Key Vault 側の更新は 30 分以内に自動で取り込まれ、参照しているリビジョンは自動で再起動される。すぐに反映したい場合は手動で再起動する。
 </details>
 
 <details><summary>Q3. Container Apps のワーカーを、Service Bus キューにメッセージが 10 件たまるごとに 1 レプリカ増やし、キューが空なら 0 にしたい。設定は？</summary>
@@ -516,9 +520,9 @@ kubectl top pod                               # CPU / メモリ（metrics-server
 **答え**: `kubectl logs <pod> --previous`（クラッシュする前のコンテナのログ）と `kubectl describe pod <pod>`（終了コード、Events）。
 </details>
 
-<details><summary>Q8. App Service のコンテナアプリが Key Vault のシークレットを参照している。シークレットをローテーションしたら、自動的に最新値を使ってほしい。参照の書き方は？</summary>
+<details><summary>Q8. App Service のコンテナアプリが Key Vault のシークレットを参照している。シークレットをローテーションしたら、自動的に最新値を使ってほしい。参照の書き方は？ すぐに反映したい場合は？</summary>
 
-**答え**: バージョンを含めない URI を使う: `@Microsoft.KeyVault(SecretUri=https://<kv>.vault.azure.net/secrets/<name>/)`。最新版が 24 時間以内に取り込まれる。
+**答え**: バージョンを含めない URI を使う: `@Microsoft.KeyVault(SecretUri=https://<kv>.vault.azure.net/secrets/<name>)`。最新版が 24 時間以内に取り込まれる。すぐに反映したいなら、アプリの構成を変更して再起動させるか、参照のリフレッシュ API（`.../config/configreferences/appsettings/refresh`）を呼ぶ。
 </details>
 
 <details><summary>Q9. 毎晩、ベースイメージの更新がなくてもイメージを再ビルドしてスキャンしたい。</summary>

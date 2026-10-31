@@ -1,6 +1,6 @@
 # 分野 2-c: Integrate Azure Managed Redis in AI solutions
 
-> 分野 2 全体の配点: 30–35%（詳細見出しは 25–30%）
+> 分野 2 全体の配点: 25–30%（4 分野で最大）
 > 対応する公式項目: 2.11、2.12 / Learn ラーニングパス: #6 Enhance AI solutions with Azure Managed Redis
 
 ## 0. 出題範囲
@@ -39,7 +39,7 @@ Redis は**メモリ上**で動くため、AI アプリでは次の用途で使�
 | CLI | `az redisenterprise` | `az redis` |
 | Entra ID 認証 | **既定で有効** | 有効化が必要 |
 | モジュール（RediSearch、RedisJSON など） | **使える（作成時のみ選択）** | 使えない |
-| 今後 | 新規はこちらが推奨 | 既存サービスは廃止予定が発表済み（移行先が AMR） |
+| 今後 | 新規はこちらが推奨 | **2028-09-30 に廃止**（Basic / Standard / Premium）。新規顧客は 2026-04-01 から作成不可。移行先が AMR |
 
 **レベル（SKU）**
 
@@ -60,12 +60,15 @@ Redis は**メモリ上**で動くため、AI アプリでは次の用途で使�
 | **Enterprise** | 1 つのエンドポイント。プロキシがコマンドを振り分ける | どのクライアントでも使える。**RediSearch に必要** |
 | 非クラスター | シャーディングなし | **25 GB まで**。既存の非クラスターキャッシュからの移行用 |
 
-**作成時に決めること（後から変えられない）**
+**作成時に決めること（後から変えにくいもの）**
 
-- **モジュール**（RediSearch / RedisJSON / RedisBloom / RedisTimeSeries）は**作成時にしか追加できない**。
-- RediSearch を使うなら **Enterprise クラスタリングポリシー** と **NoEviction** の追い出しポリシー。
-- 高可用性（レプリカ）は後から無効化できない。無効にすると SLA がない（開発用）。
-- **スケールダウンはできない**。
+- **モジュール**（RediSearch / RedisJSON / RedisBloom / RedisTimeSeries）は**作成時にしか追加できない**。Flash Optimized で使えるのは RedisJSON だけ。アクティブ geo レプリケーションと併用できるのは RediSearch と RedisJSON だけ。
+- RediSearch を使うなら **Enterprise クラスタリングポリシー** と **NoEviction** の追い出しポリシーが**必須**。
+- **クラスタリングポリシーは作成時に決まり、基本的に変更できない**（非クラスター → クラスターへの変更だけは可能）。
+- **Flash Optimized と in-memory のレベル（M / B / X）の間ではスケールできない**（作り直しになる）。
+- スケールダウン（メモリを減らす）は、現在の使用量が移行先のサイズより小さく、vCPU / シャード構成に互換性がある場合に可能。
+- スケールで IP アドレスが変わることがあるので、IP ではなく DNS 名で接続する。
+- 高可用性（レプリカ）を無効にすると SLA がない（開発用）。
 
 ### 2.2 データ操作（2.11）
 
@@ -114,7 +117,7 @@ Redis は**メモリ上**で動くため、AI アプリでは次の用途で使�
 
 | ポリシー | 対象 |
 |---|---|
-| `volatile-lru` | **TTL が設定されたキー**から LRU で追い出す（TTL がないキーは追い出されない） |
+| `volatile-lru`（**AMR の既定**） | **TTL が設定されたキー**から LRU で追い出す（TTL がないキーは追い出されない） |
 | `allkeys-lru` / `allkeys-lfu` | すべてのキーから追い出す（純粋なキャッシュ向け） |
 | `volatile-ttl` | 残り TTL が短いものから |
 | **`noeviction`** | 追い出さず、書き込みをエラーにする（**RediSearch 使用時**、データを失いたくない場合） |
@@ -124,6 +127,7 @@ Redis は**メモリ上**で動くため、AI アプリでは次の用途で使�
 - **接続を使い回す**（.NET は `ConnectionMultiplexer` をシングルトン、redis-py は接続プール）。
 - TLS（ポート 10000）、タイムアウトと**指数バックオフ付きの再試行**。
 - **`KEYS *` は本番で使わない**（全キーを走査してブロックする）。`SCAN` を使う。
+- メモリは **Used Memory Percentage** メトリックで監視し、常に 75% を超えるならスケールアップを検討する。
 - 大きな値（数百 KB 以上）を避ける。複数のコマンドは**パイプライン**でまとめる。
 - 認証は **Microsoft Entra ID**（`redis-entraid` パッケージ、スコープ `https://redis.azure.com/.default`）。アクセスキーは無効化できる。
 
@@ -278,7 +282,9 @@ for doc in res.docs:
 
 - `az redis create` は **Azure Cache for Redis** を作る。AMR は **`az redisenterprise create`**。
 - AMR の TLS ポートは **10000**（Azure Cache for Redis は 6380）。
-- **モジュールは作成時のみ**。RediSearch は **Enterprise ポリシー必須**、OSS ポリシーとは併用不可、Flash Optimized では使えない。
+- **モジュールは作成時のみ**。RediSearch は **Enterprise ポリシー＋ NoEviction が必須**、OSS ポリシーとは併用不可、Flash Optimized では使えない。
+- 追い出しポリシーの**既定は `volatile-lru`**。
+- クラスタリングポリシーは作成後に基本的に変更できない。Flash と in-memory のレベル間ではスケールできない。
 - `SET` で上書きすると TTL が消える。
 - `TTL` の戻り値 -1 は「期限なし」、-2 は「キーなし」。
 - `volatile-lru` では **TTL のないキーは追い出されない**（メモリ不足でエラーになりうる）。
@@ -316,7 +322,7 @@ for doc in res.docs:
 
 <details><summary>Q6. メモリが一杯になり書き込みがエラーになった。キーには TTL を付けていない。追い出しポリシーは `volatile-lru`。なぜか。</summary>
 
-**答え**: `volatile-lru` は TTL が設定されたキーだけを追い出すため、追い出せるキーがなかった。キャッシュ用途ならキーに TTL を付けるか、（RediSearch を使わないなら）`allkeys-lru` を検討。
+**答え**: `volatile-lru`（AMR の既定）は TTL が設定されたキーだけを追い出すため、追い出せるキーがなかった。キャッシュ用途ならキーに TTL を付けるか、（RediSearch を使わないなら）`allkeys-lru` を検討。
 </details>
 
 ## 7. チェックリスト
