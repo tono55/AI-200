@@ -1,0 +1,419 @@
+# 分野 3 追加問題: Azure Functions（3.3〜3.4）
+
+# ---------- 3.3 ----------
+- id: s-func-swallow-exception
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, service-bus, error-handling]
+  question: |
+    Service Bus トリガーの関数（`autoCompleteMessages` は既定の true）で、LLM の呼び出しが失敗したときに例外を `try/except` で握りつぶしてログだけ出し、正常終了させています。この実装の問題点はどれですか。
+  options:
+    - "関数が正常終了するとメッセージは complete され、失敗したジョブは再試行も DLQ への移動もされずに失われる"
+    - "例外を握りつぶすと、関数アプリが停止する"
+    - "メッセージが無限に再配信される"
+    - "特に問題はない"
+  answer: A
+  explanation: |
+    自動完了が有効な場合、関数が成功するとメッセージは complete されます。一時的な失敗は例外を投げて abandon させ（配信回数が増え、上限で DLQ へ）、恒久的な失敗は明示的に配信不能にするなど、失敗を Service Bus に伝える必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-service-bus-trigger
+
+- id: s-func-blob-trigger-flex
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, blob-trigger, flex-consumption]
+  question: |
+    Flex Consumption プランで、Blob にアップロードされた PDF を処理する関数を作ります。低遅延で確実にトリガーさせたいです。Blob トリガーの構成として正しいものはどれですか。
+  options:
+    - "Event Grid をソースにした Blob トリガー（`source=\"EventGrid\"`）を使い、ストレージのイベント サブスクリプションで関数を呼び出す"
+    - "ポーリング方式の既定の Blob トリガーを使う"
+    - "Timer トリガーで 1 分ごとに Blob を列挙する"
+    - "HTTP トリガーをストレージに直接呼ばせる"
+  answer: A
+  explanation: |
+    Flex Consumption では、Blob トリガーは **Event Grid ベース**（イベント ソース）を使います。ポーリング方式より低遅延で、大量のコンテナーでも効率的です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-event-grid-blob-trigger
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan
+
+- id: s-func-http-auth
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, http, authentication]
+  question: |
+    `http_auth_level=func.AuthLevel.FUNCTION` の HTTP 関数を、社内のフロントエンドから呼んでいます。関数キーをブラウザーの JavaScript に埋め込むのは避けたく、利用者の Entra ID でアクセスを制御したいです。最も適切な方法はどれですか。
+  options:
+    - "関数アプリで App Service 認証（Easy Auth）に Microsoft Entra ID を構成する（必要に応じて API Management などのゲートウェイも検討）"
+    - "関数キーを URL のクエリ文字列に入れて公開する"
+    - "認証レベルを ADMIN にする"
+    - "CORS で全オリジンを許可する"
+  answer: A
+  explanation: |
+    関数キーは共有シークレットで、ブラウザーに配ると漏えいします。利用者単位の認証には、組み込みの認証（Easy Auth）で Entra ID を構成するのが簡単です。CORS は呼び出し元のオリジンの制御で、認証の代わりにはなりません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/security-concepts
+    - https://learn.microsoft.com/azure/app-service/overview-authentication-authorization
+
+- id: s-func-multi-output
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, bindings, python]
+  question: |
+    HTTP 関数で受け取った 1 つの文書を 30 個のチャンクに分け、それぞれを Service Bus キューの別々のメッセージとして送りたいです。Python v2 の出力バインドの使い方として正しいものはどれですか。
+  options:
+    - "`func.Out[typing.List[str]]` の出力バインドに、30 個の文字列のリストを `set()` する"
+    - "1 つの関数に 30 個の出力バインドを定義する"
+    - "出力バインドは 1 つのメッセージしか送れないため、必ず SDK を使う"
+    - "HTTP の応答として 30 個のメッセージを返す"
+  answer: A
+  explanation: |
+    Service Bus などの出力バインドは、リスト（コレクション）を設定すると複数のメッセージとして送信できます。細かい制御（スケジュール、セッション ID など）が必要なら SDK を使う選択肢もあります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-service-bus-output
+
+- id: s-func-cosmos-input-binding
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, cosmos-db, input-binding]
+  question: |
+    `GET /docs/{tenant}/{id}` の HTTP 関数で、Cosmos DB から 1 件の文書を返します。コードで SDK を呼ばずに、バインドで取得したいです。最も効率的な入力バインドの設定はどれですか。
+  options:
+    - "Cosmos DB 入力バインドで `id=\"{id}\"`、`partition_key=\"{tenant}\"` をルート パラメーターのバインド式で指定する（ポイント読み取り）"
+    - "`sql_query=\"SELECT * FROM c\"` で全件取得し、関数内で絞り込む"
+    - "Cosmos DB トリガーを使う"
+    - "Timer トリガーで定期的にキャッシュしておく"
+  answer: A
+  explanation: |
+    入力バインドではバインド式（`{id}` など）でルート パラメーターを参照できます。`id` とパーティション キーを指定するとポイント読み取りになり、最も RU が少なくなります。トリガーは変更フィードを処理するためのもので、要求ごとの取得には使いません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-input
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-expressions-patterns
+
+- id: s-func-durable-fanout
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, durable, fan-out]
+  question: |
+    100 個の文書をそれぞれ LLM で要約し、全部終わったら要約をまとめて 1 つのレポートを作ります。途中でホストが再起動しても、完了した要約をやり直したくありません。最も適した実装はどれですか。
+  options:
+    - "Durable Functions のファンアウト / ファンインで、オーケストレーターがアクティビティ関数を並列に呼び出し、全タスクの完了を待って集約する"
+    - "1 つの HTTP 関数の中で 100 回順番に LLM を呼ぶ"
+    - "Timer トリガーで 1 件ずつ処理する"
+    - "Event Grid に 100 件のイベントを発行し、最後のイベントの受信でレポートを作る"
+  answer: A
+  explanation: |
+    Durable Functions は、オーケストレーションの進行状況を保存し、再起動後も完了済みのアクティビティを再実行せずに続きから再開します。ファンアウト / ファンインは並列処理と集約の典型パターンです。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-overview
+
+- id: s-func-durable-deterministic
+  objective: "3.3"
+  type: yesno
+  difficulty: 3
+  tags: [functions, durable, orchestrator]
+  question: |
+    Durable Functions のオーケストレーター関数について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "オーケストレーターはリプレイされるため、決定論的なコードにする必要がある。"
+      answer: true
+    - text: "オーケストレーターの中で直接 LLM の API を呼び出してよい。"
+      answer: false
+    - text: "現在時刻が必要な場合は、`datetime.now()` ではなくオーケストレーション コンテキストの現在時刻（`current_utc_datetime`）を使う。"
+      answer: true
+    - text: "I/O や時間のかかる処理はアクティビティ関数で行う。"
+      answer: true
+  explanation: |
+    オーケストレーターは履歴をもとに何度もリプレイされるため、実行のたびに結果が変わる処理（現在時刻、乱数、外部呼び出し）を直接行ってはいけません。外部呼び出しはアクティビティ関数に任せます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-code-constraints
+
+- id: s-func-one-trigger
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, triggers]
+  question: |
+    同じ要約処理を、「HTTP で即時に呼ばれた場合」と「Service Bus キューにメッセージが来た場合」の両方で実行したいです。Azure Functions での正しい設計はどれですか。
+  options:
+    - "HTTP トリガーの関数と Service Bus トリガーの関数を別々に作り、共通の処理を同じモジュールの関数として呼び出す"
+    - "1 つの関数に HTTP トリガーと Service Bus トリガーの両方を付ける"
+    - "Service Bus トリガーを入力バインドとして HTTP 関数に付ける"
+    - "Timer トリガーで両方をポーリングする"
+  answer: A
+  explanation: |
+    1 つの関数が持てるトリガーは**1 つだけ**です。入口ごとに関数を分け、ビジネス ロジックは共通化します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-triggers-bindings
+
+- id: s-func-concurrency-ratelimit
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, service-bus, concurrency]
+  question: |
+    Service Bus トリガーの関数が LLM を呼び出しています。メッセージが急増すると関数が大量に並列実行され、LLM の API から 429（レート制限）が多発します。関数アプリ側で同時実行を抑えるには、何を調整しますか。
+  options:
+    - "`host.json` の Service Bus 拡張の `maxConcurrentCalls`（セッションなら `maxConcurrentSessions`）を小さくする。必要ならインスタンス数の上限も設定する"
+    - "キューの最大配信回数を 1 にする"
+    - "Timer トリガーに変える"
+    - "関数のタイムアウトを短くする"
+  answer: A
+  explanation: |
+    `maxConcurrentCalls` は 1 インスタンスあたりの同時処理数です。全体の並列数は「インスタンス数 × 同時処理数」なので、スケール アウトの上限（Flex の最大インスタンス数など）も合わせて調整します。429 には再試行（バックオフ）も必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-service-bus#hostjson-settings
+    - https://learn.microsoft.com/azure/azure-functions/functions-scale
+
+- id: s-func-client-reuse
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, performance, sdk]
+  question: |
+    HTTP 関数の中で、呼び出しのたびに `CosmosClient` と `httpx.Client` を新しく作っています。負荷が高くなると接続エラー（ソケットの枯渇）や遅延が増えます。最も適切な修正はどれですか。
+  options:
+    - "クライアントを関数の外（モジュールのグローバル）で一度だけ作り、呼び出し間で使い回す"
+    - "関数のタイムアウトを延ばす"
+    - "呼び出しのたびにクライアントを作り、終わったら `sleep` する"
+    - "Premium プランにすれば解決する"
+  answer: A
+  explanation: |
+    関数のインスタンスは複数の呼び出しで再利用されます。SDK や HTTP クライアントを静的（グローバル）に作って使い回すと、接続の再利用で性能が上がり、接続数の枯渇を防げます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/manage-connections
+
+- id: s-func-retry-policy
+  objective: "3.3"
+  type: yesno
+  difficulty: 3
+  tags: [functions, retry]
+  question: |
+    Azure Functions の再試行について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "Timer トリガーや Cosmos DB トリガーでは、関数アプリの再試行ポリシー（固定間隔 / 指数バックオフ）を設定できる。"
+      answer: true
+    - text: "Service Bus トリガーの再試行は、主に Service Bus 側の配信回数（最大配信回数と DLQ）で制御される。"
+      answer: true
+    - text: "HTTP トリガーで関数が失敗すると、Functions のランタイムが自動で同じ要求を再送する。"
+      answer: false
+  explanation: |
+    再試行ポリシーは一部のトリガー（Timer、Cosmos DB、Event Hubs、Kafka など）でサポートされます。キュー系のトリガーは、メッセージング サービス側の再配信の仕組みを使います。HTTP は呼び出し元が再試行を担います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-error-pages
+
+- id: s-func-output-and-return
+  objective: "3.3"
+  type: dropdown
+  difficulty: 2
+  tags: [functions, python, bindings]
+  question: |
+    HTTP で受け取った質問を Storage キュー `questions` に入れ、受け付けたことを 202 で返す関数を完成させてください（Python v2）。
+  language: python
+  template: |
+    @app.route(route="ask", methods=["POST"])
+    @app.{{1}}(arg_name="msg", queue_name="questions", connection="StorageConnection")
+    def ask(req: func.HttpRequest, msg: func.{{2}}[str]) -> func.HttpResponse:
+        msg.set(req.get_body().decode())
+        return func.HttpResponse(status_code={{3}})
+  blanks:
+    "1": {options: [queue_output, queue_trigger, blob_output], answer: queue_output}
+    "2": {options: [Out, In, Document], answer: Out}
+    "3": {options: ["202", "200", "500"], answer: "202"}
+  explanation: |
+    出力バインドは `func.Out[型]` の引数で受け取り、`set()` で値を設定します。処理を非同期で受け付けたことを表すには 202（Accepted）を返します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-storage-queue-output
+
+# ---------- 3.4 ----------
+- id: s-func-always-ready
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, flex-consumption, cold-start]
+  question: |
+    Flex Consumption の HTTP 関数で、深夜明けの最初のリクエストだけ数秒遅いことが問題になっています。サーバーレスの課金モデルは維持したいです。最も適切な設定はどれですか。
+  options:
+    - "常時準備インスタンス（always ready）を HTTP 関数に 1 つ以上設定する"
+    - "Dedicated プランに移行して Always On を有効にする"
+    - "関数のタイムアウトを延ばす"
+    - "Timer トリガーで 1 分ごとに自分自身を呼ぶ"
+  answer: A
+  explanation: |
+    Flex Consumption の**常時準備インスタンス**は、指定した数のインスタンスを常に起動しておき、コールド スタートを避けます（その分のコストはかかる）。自分自身を定期的に呼ぶ「ウォームアップ」は確実ではありません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan
+
+- id: s-func-instance-memory
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, flex-consumption, memory]
+  question: |
+    Flex Consumption の関数が、ドキュメントの解析ライブラリと小さなモデルを読み込むときにメモリ不足で失敗します。コードを変えずに対処するには何を変更しますか。
+  options:
+    - "インスタンスのメモリ サイズを大きくする（例: 2,048 MB から 4,096 MB へ）"
+    - "最大インスタンス数を増やす"
+    - "`maxConcurrentCalls` を増やす"
+    - "Timer トリガーに変える"
+  answer: A
+  explanation: |
+    Flex Consumption ではインスタンスのメモリ サイズを選べ（512 / 2,048 / 4,096 MB など）、CPU もメモリに比例して割り当てられます。インスタンス数を増やしても 1 インスタンスのメモリは増えません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan
+
+- id: s-func-kvref-settings
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, key-vault, configuration]
+  question: |
+    関数アプリで、ID ベースの接続に対応していない外部 API のキーを使います。キーはアプリ設定に平文で置かず、Key Vault で管理したいです。最も簡単な方法はどれですか。
+  options:
+    - "アプリ設定の値を `@Microsoft.KeyVault(SecretUri=...)` の Key Vault 参照にし、関数アプリのマネージド ID に Key Vault Secrets User を付与する"
+    - "キーを `local.settings.json` に書いてデプロイする"
+    - "キーを `host.json` に書く"
+    - "キーをコードに埋め込む"
+  answer: A
+  explanation: |
+    Azure Functions は App Service と同じ Key Vault 参照をサポートし、コードからは通常の環境変数として読めます。`local.settings.json` はデプロイされず、`host.json` に秘密を置くべきではありません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/app-service-key-vault-references
+
+- id: s-func-run-from-package
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, deployment, run-from-package]
+  question: |
+    ZIP デプロイ（パッケージから実行）に切り替えたところ、関数が `wwwroot` 配下に一時ファイルを書き込む処理で失敗するようになりました。原因と対処はどれですか。
+  options:
+    - "パッケージから実行するとアプリのファイル（wwwroot）は読み取り専用になる。一時ファイルは一時ディレクトリ（`tempfile` など）や外部ストレージに書く"
+    - "ZIP デプロイではファイル書き込みが一切できないので、デプロイ方法を元に戻すしかない"
+    - "`host.json` のバージョンを上げる"
+    - "関数キーを再生成する"
+  answer: A
+  explanation: |
+    `WEBSITE_RUN_FROM_PACKAGE` などでパッケージから実行すると、デプロイされたコードはマウントされた読み取り専用のファイル システムになります。アトミックなデプロイと高速な起動のメリットがあり、書き込みは一時領域やストレージに分けます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/run-functions-from-deployment-package
+
+- id: s-func-oidc-deploy
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, ci-cd, github-actions]
+  question: |
+    GitHub Actions から関数アプリにデプロイしています。現在は発行プロファイル（資格情報を含む XML）を GitHub のシークレットに保存しています。長期間有効な資格情報を GitHub に置かない方法として最も適切なものはどれですか。
+  options:
+    - "Microsoft Entra のアプリ（またはユーザー割り当てマネージド ID）にフェデレーション資格情報（OIDC）を設定し、`azure/login` で認証してからデプロイする"
+    - "発行プロファイルを毎日手動で再生成する"
+    - "関数キーでデプロイする"
+    - "ストレージ アカウントのキーを使ってファイルをコピーする"
+  answer: A
+  explanation: |
+    OpenID Connect（ワークロード ID フェデレーション）を使うと、GitHub Actions は実行ごとに短期間のトークンを取得して Azure にログインでき、シークレットを保存する必要がありません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-how-to-github-actions
+    - https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect
+
+- id: s-func-isolated-migration
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, dotnet]
+  question: |
+    .NET の関数アプリが in-process モデルで動いています。今後の運用として最も適切な対応はどれですか（2026 年 11 月時点）。
+  options:
+    - "isolated worker モデルに移行する（in-process モデルのサポートは 2026 年 11 月 10 日に終了）"
+    - "in-process モデルのまま、ランタイム v3 に下げる"
+    - "Python に書き直すしかない"
+    - "何もしなくても自動で isolated worker に変換される"
+  answer: A
+  explanation: |
+    .NET の関数は isolated worker モデルが今後の標準です。in-process モデルはサポート終了が予定されているため、移行が必要です（ランタイム v3 はすでにサポート終了）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/migrate-dotnet-to-isolated-model
+
+- id: s-func-storage-identity
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, storage, managed-identity]
+  question: |
+    セキュリティ ポリシーで、関数アプリが使うストレージ アカウントのアクセス キーを無効にすることになりました。関数アプリの必須設定 `AzureWebJobsStorage` をどう構成しますか。
+  options:
+    - "`AzureWebJobsStorage__accountName`（またはサービス URI）を設定し、関数アプリのマネージド ID にストレージのデータ プレーン ロール（Storage Blob Data Owner など必要なもの）を付与する"
+    - "`AzureWebJobsStorage` を削除する"
+    - "`AzureWebJobsStorage` に SAS トークンを無期限で設定する"
+    - "ストレージ アカウントを使わない関数アプリに変える"
+  answer: A
+  explanation: |
+    `AzureWebJobsStorage` も ID ベースの接続に対応しています。`__accountName` などの設定と、ホストが使う Blob / キュー / テーブルへのロールの付与で、キーなしで動かせます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference#connecting-to-host-storage-with-an-identity
+
+- id: s-func-config-change-restart
+  objective: "3.4"
+  type: yesno
+  difficulty: 2
+  tags: [functions, configuration]
+  question: |
+    関数アプリの構成について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "アプリ設定を変更すると、関数アプリは再起動して新しい値を読み込む。"
+      answer: true
+    - text: "`FUNCTIONS_WORKER_RUNTIME` には、アプリの言語（例: `python`、`dotnet-isolated`）を設定する。"
+      answer: true
+    - text: "`local.settings.json` の `Values` は、Azure 上のアプリ設定より優先される。"
+      answer: false
+    - text: "ブラウザーの JavaScript から関数を呼ぶ場合、関数アプリの CORS で呼び出し元のオリジンを許可する必要がある。"
+      answer: true
+  explanation: |
+    `local.settings.json` はローカル実行専用で、Azure では使われません。アプリ設定の変更は再起動を伴うため、運用中の変更はタイミングに注意します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-app-settings
+    - https://learn.microsoft.com/azure/azure-functions/functions-develop-local
+
+- id: s-func-deploy-order
+  objective: "3.4"
+  type: order
+  difficulty: 2
+  tags: [functions, deployment]
+  question: |
+    Python の関数アプリ（Flex Consumption、ID ベースの接続）を新しく作り、Service Bus トリガーの関数を動かすまでの手順を順に並べてください。
+  items:
+    - "`az functionapp create --flexconsumption-location ...` で関数アプリを作成する"
+    - "関数アプリのマネージド ID を有効にし、Service Bus の Data Receiver ロールを付与する"
+    - "アプリ設定に `ServiceBusConnection__fullyQualifiedNamespace` を追加する"
+    - "`func azure functionapp publish` などでコードをデプロイする"
+  distractors:
+    - "`local.settings.json` をアップロードする"
+  explanation: |
+    ID ベースの接続では、ID の有効化とロールの付与、接続設定（`__fullyQualifiedNamespace`）がそろってから関数が正しく動きます。コードのデプロイは最後でも最初でもかまいませんが、設定がそろうまでトリガーは失敗します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-identity-based-connections-tutorial-2
+
+- id: s-func-premium-vs-flex
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, hosting, premium]
+  question: |
+    関数アプリで、OS レベルのパッケージ（独自にビルドしたライブラリ）を含む**カスタム Linux コンテナー**を使う必要があり、さらに VNet 内のリソースにアクセスし、コールド スタートも避けたいです。最も適したホスティングはどれですか。
+  options:
+    - "Premium プラン（または Container Apps でのホスティング）"
+    - "Flex Consumption プラン"
+    - "Consumption プラン（レガシー、Windows）"
+    - "Dedicated プランで Always On を無効にする"
+  answer: A
+  explanation: |
+    Flex Consumption はコンテナーに対応していません。Premium はカスタム Linux コンテナー、VNet 統合、事前ウォーム済みインスタンスに対応します。Container Apps でのホスティングもコンテナーと VNet に対応します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-scale
+    - https://learn.microsoft.com/azure/azure-functions/functions-premium-plan
