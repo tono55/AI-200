@@ -187,25 +187,24 @@
   refs:
     - https://learn.microsoft.com/azure/azure-functions/functions-bindings-expressions-patterns
 
-- id: s-func-cosmos-trigger-leases
+- id: s-func-queue-poison
   objective: "3.3"
   type: single
   difficulty: 3
-  tags: [functions, cosmos-db, change-feed, leases]
+  tags: [functions, storage-queue, poison-queue]
   question: |
-    同じ Cosmos DB コンテナー `docs` を監視する Cosmos DB トリガーの関数を 2 つ作りました（「埋め込みの再計算」と「検索キャッシュの無効化」）。どちらも既定のリース コンテナー `leases` を使っています。動かしてみると、それぞれの関数が**一部の変更しか受け取っていない**ようです。最も適切な対処はどれですか。
+    Storage キュー `jobs` をトリガーにした関数が、ある不正なメッセージで毎回例外を出しています。数分後、そのメッセージは `jobs` から消え、別のキューに移っていました。この動作について正しい説明はどれですか（既定の設定）。
   options:
-    - "関数ごとに異なる `lease_container_prefix`（`leaseContainerPrefix`）を設定するか、別のリース コンテナーを使う"
-    - "2 つの関数を別々の関数アプリに分ければ、同じリースのままでよい"
-    - "`start_from_beginning` を true にする"
-    - "`max_items_per_invocation` を 1 にする"
+    - "処理が 5 回失敗する（`maxDequeueCount` の既定値）と、メッセージは `jobs-poison` キューに移される。原因を調べて修正後に再投入する"
+    - "失敗したメッセージは Service Bus の配信不能キューに移される"
+    - "失敗したメッセージは自動で削除され、復元できない"
+    - "失敗したメッセージは成功するまで無制限に再試行される"
   answer: A
   explanation: |
-    Cosmos DB トリガーは変更フィード プロセッサで動き、リースで「どのパーティション範囲を誰が処理しているか」とチェックポイントを管理します。2 つの関数が同じリースを共有すると、**同じ処理の複数インスタンス**とみなされて変更を分け合ってしまいます。
-    独立して全部の変更を受け取りたいなら、関数ごとにリースのプレフィックスを分ける（同じリース コンテナーを共有できる）か、リース コンテナーを分けます。別のアプリに分けても、リースが同じなら同じ問題が起きます。
+    Storage キューのトリガーは、処理に失敗したメッセージを可視性タイムアウト後に再試行し、`host.json` の `maxDequeueCount`（既定 5）回失敗すると `<キュー名>-poison` という**有害（poison）キュー**に移します。有害キューを監視し、原因を修正してから再投入します。
+    Service Bus の配信不能キューに相当する仕組みですが、別のサービスなので混同しないようにします。
   refs:
-    - https://learn.microsoft.com/azure/cosmos-db/how-to-create-multiple-cosmos-db-triggers
-    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-trigger
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-storage-queue-trigger
 
 - id: s-func-timer-facts
   objective: "3.3"

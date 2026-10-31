@@ -1,0 +1,362 @@
+# 分野 2 追加問題（3 周目）: Cosmos DB / PostgreSQL / Azure Managed Redis の補強
+
+# ---------- 2.1 ----------
+- id: d-cosmos-gateway-mode
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, sdk, connection-mode, network]
+  question: |
+    オンプレミスのデータ センターで動く .NET のバッチから Cosmos DB に接続します。社内ファイアウォールは送信先として 443 番ポートしか許可しておらず、SDK の既定の接続モードではタイムアウトします。最も適切な対処はどれですか。
+  options:
+    - "`CosmosClientOptions.ConnectionMode` を Gateway にする（HTTPS の 443 番だけで通信する）"
+    - "整合性レベルを Eventual にする"
+    - "`MaxRetryAttemptsOnRateLimitedRequests` を増やす"
+    - "コンテナーのスループットを上げる"
+  answer: A
+  explanation: |
+    .NET や Java の SDK の既定は **Direct モード**で、バックエンドのレプリカに TCP で直接接続するため、443 以外のポート範囲（10250〜10255 など）への送信が必要です。ポートが制限された環境では **Gateway モード**（HTTPS 443 でゲートウェイ経由）を使います。
+    Gateway モードは 1 ホップ増えるので、ポートの制約がない Azure 上のアプリでは、低遅延の Direct モードが推奨です（Python や JavaScript の SDK はゲートウェイ経由で通信します）。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/sdk-connection-modes
+
+- id: d-cosmos-unique-key
+  objective: "2.1"
+  type: yesno
+  difficulty: 3
+  tags: [cosmos-db, unique-key, container-design]
+  question: |
+    チャンクのコンテナー（パーティション キー `/docId`）で、同じ文書の同じチャンク番号が二重に登録されないように、一意キー ポリシー `/chunkIndex` を使うことを検討しています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "一意キーは、論理パーティション（同じ `docId`）の中で一意であることを保証する。"
+      answer: true
+    - text: "一意キー ポリシーは、既存のコンテナーに後から追加できる。"
+      answer: false
+    - text: "一意キーに違反する書き込みは、409（Conflict）で失敗する。"
+      answer: true
+    - text: "一意キーを使わなくても、`id` を `<docId>-<chunkIndex>` のように決定的に作れば、同じパーティション内での重複を防げる。"
+      answer: true
+  explanation: |
+    一意キーは**論理パーティションの範囲**で一意性を保証し（コンテナー全体ではない）、違反すると 409 になります。一意キー ポリシーはコンテナーの作成時にしか設定できないので、後から必要になった場合は新しいコンテナーを作ってデータを移行します。
+    `id` もパーティション内で一意なので、決定的な `id` を使って upsert するのも、再処理に強い簡単な方法です。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/unique-keys
+
+
+
+# ---------- 2.5 ----------
+- id: d-pg-tls
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, tls, connection]
+  question: |
+    社内のツールから Azure Database for PostgreSQL フレキシブル サーバーに接続すると、`no pg_hba.conf entry for host ... no encryption` というエラーで拒否されます。接続文字列には `sslmode=disable` が指定されていました。最も適切な対処はどれですか。
+  options:
+    - "TLS を使うように `sslmode=require`（サーバー証明書も検証するなら `verify-full` とルート CA 証明書）に変更する"
+    - "サーバー パラメーターで TLS を無効にして、平文の接続を許可する"
+    - "ポートを 5432 から 6432 に変更する"
+    - "Entra ID 認証を無効にする"
+  answer: A
+  explanation: |
+    フレキシブル サーバーは既定で TLS による暗号化接続を必須にしています（`require_secure_transport`）。クライアントは `sslmode=require` 以上で接続します。中間者攻撃まで防ぐには、`verify-full` でサーバー証明書とホスト名を検証します。
+    セキュリティを下げて平文を許可するのは避けます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/security-tls
+
+- id: d-pg-sqlalchemy-token
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, sqlalchemy, entra-id, connection-pool]
+  question: |
+    SQLAlchemy の接続プールで PostgreSQL に Entra ID 認証で接続しています。起動時に取得したトークンを接続 URL のパスワードに埋め込んだところ、約 1 時間後から新しい接続の作成だけが失敗するようになりました。最も適切な修正はどれですか。
+  options:
+    - "エンジンの `do_connect` イベントで、接続を作るたびに `DefaultAzureCredential` から新しいトークンを取得してパスワードに設定する（`pool_recycle` もトークンの有効期間より短くする）"
+    - "プールのサイズを 0 にする"
+    - "トークンの代わりに、Entra 管理者のパスワードを使う"
+    - "`statement_timeout` を延ばす"
+  answer: A
+  explanation: |
+    アクセス トークンは接続を**確立するとき**のパスワードとして使われ、期限（約 1 時間）が切れると新しい接続は作れません（確立済みの接続は使い続けられます）。プールが新しい接続を作るたびにトークンを取得し直すよう、`do_connect` イベントで接続パラメーターにトークンを差し込みます。`DefaultAzureCredential` はトークンをキャッシュするので、毎回の取得でも負荷は小さく済みます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/how-to-connect-with-managed-identity
+    - https://docs.sqlalchemy.org/en/20/core/engines.html#generating-dynamic-authentication-tokens
+
+# ---------- 2.8 ----------
+- id: d-pg-vector-memory-calc
+  objective: "2.8"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, sizing, calculation]
+  question: |
+    1536 次元の埋め込みを 200 万件、`vector` 型（単精度 = 1 次元 4 バイト）で保存します。ベクトルのデータ部分だけで、おおよそどれくらいの容量になりますか。また `halfvec`（半精度）にするとどうなりますか。
+  options:
+    - "約 12 GB。halfvec にすると約 6 GB"
+    - "約 1.2 GB。halfvec にすると約 0.6 GB"
+    - "約 12 GB。halfvec にしても変わらない"
+    - "約 24 GB。halfvec にすると約 6 GB"
+  answer: A
+  explanation: |
+    1536 × 4 バイト = 6,144 バイト（約 6 KB）/ 件、× 200 万件 ≈ 12.3 GB です。halfvec は 1 次元 2 バイトなので約半分（約 6 GB）になります。
+    HNSW インデックスはベクトルのコピーとグラフ構造を持つため、さらに同程度以上の容量が必要です。検索を速く保つには、インデックスがメモリ（共有バッファーと OS キャッシュ）に収まるかを、この見積もりで判断します。
+  refs:
+    - https://github.com/pgvector/pgvector#vector-type
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/how-to-optimize-performance-pgvector
+
+- id: d-pg-io-bound-metrics
+  objective: "2.8"
+  type: single
+  difficulty: 3
+  tags: [postgresql, metrics, iops, troubleshooting]
+  question: |
+    ベクトル検索の遅延が増えたので Azure Monitor のメトリックを確認すると、CPU 使用率は 30% 前後、メモリ使用率は 95%、ストレージの IOPS 使用率は常に 100% 近く、読み取りの待ち時間が増えていました。HNSW インデックスのサイズは、サーバーのメモリを上回っています。最も効果的な対策はどれですか。
+  options:
+    - "メモリの多い SKU（メモリ最適化など）にスケールアップするか、halfvec や量子化でインデックスを小さくして、インデックスをメモリに収める"
+    - "vCore 数が同じで CPU の速い SKU に変える"
+    - "接続プールのサイズを 2 倍にする"
+    - "`ef_search` を大きくする"
+  answer: A
+  explanation: |
+    CPU に余裕があり、IOPS が上限に張り付いているのは、インデックスがメモリに収まらず、ディスクからの読み取りが律速になっている状態です。根本対策は、インデックスをメモリに収める（メモリを増やす、またはインデックスを小さくする）ことです。暫定的にストレージの IOPS を上げる方法もあります。
+    `ef_search` を大きくすると読むノードが増え、かえって悪化します。接続を増やしても I/O の上限は変わりません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/how-to-optimize-performance-pgvector
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/concepts-monitoring
+
+- id: d-pg-static-params
+  objective: "2.8"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, server-parameters]
+  question: |
+    Azure Database for PostgreSQL フレキシブル サーバーのサーバー パラメーターについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`shared_buffers` のような静的パラメーターは、値を変更した後にサーバーを再起動しないと反映されない。"
+      answer: true
+    - text: "`work_mem` のような動的パラメーターは、再起動なしで反映され、セッション単位で `SET` で変えることもできる。"
+      answer: true
+    - text: "`maintenance_work_mem` は、インデックス作成のセッションだけで一時的に大きくすることはできない。"
+      answer: false
+  explanation: |
+    パラメーターには静的（再起動が必要）と動的（再起動不要）があり、ポータルや `az postgres flexible-server parameter show` で確認できます。`work_mem` や `maintenance_work_mem` はセッションで `SET` できるので、HNSW を作るセッションだけ `maintenance_work_mem` を大きくする、といった使い方ができます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/concepts-server-parameters
+
+# ---------- 2.9 ----------
+- id: d-pg-per-document-limit
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [postgresql, rag, diversity, window-function]
+  question: |
+    ベクトル検索の上位 10 件が、同じ長い文書の似たようなチャンクばかりになり、他の文書の情報が LLM に渡りません。1 文書あたり最大 2 チャンクに制限して上位 10 件を返したい場合、最も適切な SQL の方針はどれですか。
+  options:
+    - "まずベクトル検索で上位 50 件程度を取り、`ROW_NUMBER() OVER (PARTITION BY document_id ORDER BY distance)` で文書ごとに番号を付けて 2 以下に絞り、距離順に 10 件を返す"
+    - "`SELECT DISTINCT document_id` でベクトル検索する"
+    - "`LIMIT 2` を指定する"
+    - "`GROUP BY document_id` だけを追加する"
+  answer: A
+  explanation: |
+    最初に多めの候補をベクトル検索で取り（インデックスを使える形）、ウィンドウ関数で文書ごとの順位を付けて上限をかけます。これで、結果の多様性を確保しつつ関連性の高い順に並べられます。より高度には MMR（関連性と多様性のバランスを取る再ランキング）をアプリ側で行う方法もあります。
+    `DISTINCT` や `GROUP BY` だけでは、文書ごとの上位チャンクを選ぶことも、距離順の並びを保つこともできません。
+  refs:
+    - https://www.postgresql.org/docs/current/tutorial-window.html
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/generative-ai-overview
+
+- id: d-pg-chunk-overlap
+  objective: "2.9"
+  type: single
+  difficulty: 2
+  tags: [postgresql, rag, chunking]
+  question: |
+    規程を 500 トークンごとに機械的に区切ってチャンク化したところ、「手続きの条件」と「その例外」がちょうど境界で別々のチャンクに分かれ、片方しか検索されずに誤った回答になることがありました。チャンク化の改善として最も適切なものはどれですか。
+  options:
+    - "隣り合うチャンクに一定のオーバーラップ（例: 10〜20%）を持たせ、見出しや段落などの文書構造に沿って区切る"
+    - "チャンクを 50 トークンにして件数を増やす"
+    - "埋め込みの次元数を増やす"
+    - "HNSW の `ef_search` を大きくする"
+  answer: A
+  explanation: |
+    固定長で区切ると、意味のまとまりが境界で切れてしまいます。隣接チャンクを少し重ねる（オーバーラップ）と、境界付近の文脈がどちらのチャンクにも残ります。さらに、見出し・段落・条文などの構造に沿って区切ると、1 つのチャンクが 1 つの話題にまとまり、検索の精度が上がります。
+    チャンクを極端に小さくすると、逆に文脈が失われます。検索パラメーターや次元数はチャンクの切れ方の問題を解決しません。
+  refs:
+    - https://learn.microsoft.com/azure/search/vector-search-how-to-chunk-documents
+    - https://learn.microsoft.com/azure/architecture/ai-ml/guide/rag/rag-chunking-phase
+
+- id: d-pg-relevance-threshold
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [postgresql, rag, threshold, grounding]
+  question: |
+    社内規程の RAG で、規程に書かれていない質問（例: 社食のメニュー）にも、無関係なチャンクを根拠にもっともらしい回答を返してしまいます。検索側でできる対策として最も適切なものはどれですか。
+  options:
+    - "上位の結果でも距離が一定のしきい値を超える（類似度が低い）場合は、チャンクを LLM に渡さず「該当する規程が見つからない」と応答する"
+    - "常に上位 30 件を LLM に渡す"
+    - "`ORDER BY` を外して、ランダムなチャンクを渡す"
+    - "HNSW のインデックスを削除して、全件スキャンにする"
+  answer: A
+  explanation: |
+    ベクトル検索は「最も近いもの」を必ず返すので、関連する文書がなくても何かしらのチャンクが返ります。距離（類似度）のしきい値を設け、それを満たさない場合は回答を控えるのが基本的な対策です（しきい値は評価用の質問セットで調整します）。プロンプトで「根拠がなければ答えない」と指示することも併用します。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/generative-ai-overview
+    - https://learn.microsoft.com/azure/architecture/ai-ml/guide/rag/rag-information-retrieval
+
+# ---------- 2.10 ----------
+- id: d-pg-connection-cost
+  objective: "2.10"
+  type: single
+  difficulty: 2
+  tags: [postgresql, connections, latency]
+  question: |
+    API はリクエストごとに PostgreSQL へ新しい接続を開き、クエリ 1 回の後に閉じています。クエリ自体は 5 ms なのに、API の応答には毎回 60 ms 以上かかります。主な原因と対策として最も適切なものはどれですか。
+  options:
+    - "接続の確立（TCP・TLS のハンドシェイク、認証、サーバー側のバックエンド プロセスの起動）に時間がかかっている。アプリ全体で接続プールを使い、接続を再利用する"
+    - "クエリにインデックスがない"
+    - "`work_mem` が小さすぎる"
+    - "TLS を無効にすれば解決するので、`sslmode=disable` にする"
+  answer: A
+  explanation: |
+    PostgreSQL は接続ごとにバックエンド プロセスを起動し、TLS と認証（Entra ID ならトークンの検証）も行うため、接続の確立は高コストです。アプリ内の接続プール（psycopg_pool、SQLAlchemy など）で接続を再利用します。インスタンス数が多い場合は、PgBouncer でサーバー側の接続数も抑えます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/concepts-connection-pooling-best-practices
+
+- id: d-pg-stale-connections
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, connection-pool, idle-timeout]
+  question: |
+    夜間にアクセスがほとんどない API で、朝の最初のリクエストだけ `server closed the connection unexpectedly` で失敗し、再試行すると成功します。アプリは接続プールを使っています。最も適切な対策はどれですか。
+  options:
+    - "プールの接続を使う前に生存確認する設定（SQLAlchemy の `pool_pre_ping=True` など）や、アイドル接続の最大寿命（`pool_recycle`）・TCP キープアライブを設定する"
+    - "接続プールをやめて、毎回新しい接続を作る"
+    - "PostgreSQL の `max_connections` を増やす"
+    - "読み取りレプリカを追加する"
+  answer: A
+  explanation: |
+    長時間アイドルだった接続は、途中のネットワーク機器のアイドル タイムアウトやサーバー側の再起動・フェールオーバーで切断されていることがあり、プールはそれを知らずに渡してしまいます。使う前の生存確認（pre-ping）、一定時間でのリサイクル、TCP キープアライブで、切れた接続を使わないようにします。一時的なエラーに対する再試行も併用します。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/concepts-connection-pooling-best-practices
+    - https://docs.sqlalchemy.org/en/20/core/pooling.html#disconnect-handling-pessimistic
+
+- id: d-pg-any-array
+  objective: "2.10"
+  type: single
+  difficulty: 2
+  tags: [postgresql, round-trips, batching]
+  question: |
+    RAG の後処理で、検索結果の 20 個の `document_id` それぞれについて `SELECT title, url FROM documents WHERE id = %s` を 1 回ずつ実行しており、往復で 40 ms かかっています。往復回数を減らす最も簡単な方法はどれですか。
+  options:
+    - "`SELECT id, title, url FROM documents WHERE id = ANY(%s)` に ID のリストを 1 回で渡す（またはベクトル検索のクエリで `documents` と結合する）"
+    - "20 個のクエリを 20 個のスレッドで並列に実行する"
+    - "`documents` を Redis にすべてコピーする"
+    - "`documents.id` にハッシュ インデックスを追加する"
+  answer: A
+  explanation: |
+    遅さの原因はクエリそのものではなく**往復回数**です。`= ANY(配列)` で 1 回のクエリにまとめるか、検索のクエリで最初から結合すれば、往復は 1 回になります。
+    並列化は往復の待ち時間を重ねるだけで接続数も増やし、インデックスの追加は 1 回あたりの実行時間しか改善しません。
+  refs:
+    - https://www.postgresql.org/docs/current/functions-comparisons.html
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/concepts-connection-pooling-best-practices
+
+# ---------- 2.11 ----------
+- id: d-redis-crossslot
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, cluster, hash-tag]
+  question: |
+    Azure Managed Redis（クラスタリング ポリシー OSS、クラスター対応クライアント）で、会話の履歴 `conv:123:msgs` と要約 `conv:123:summary` を `MULTI`/`EXEC` のトランザクションでまとめて更新しようとすると、`CROSSSLOT` エラーになります。最も適切な対処はどれですか。
+  options:
+    - "キー名にハッシュ タグを使い（`conv:{123}:msgs` と `conv:{123}:summary`）、関連するキーが同じハッシュ スロットに入るようにする"
+    - "`MULTI` の代わりに `KEYS conv:123:*` を使う"
+    - "メモリの大きい SKU に変える"
+    - "2 つのキーの TTL を同じにする"
+  answer: A
+  explanation: |
+    クラスター構成では、キーはハッシュ スロットごとに別々のシャードに置かれ、複数のキーを扱うコマンドやトランザクションは、すべてのキーが**同じスロット**にある必要があります。キー名の `{...}` の部分だけでスロットが決まる**ハッシュ タグ**を使えば、関連するキーを同じスロットにまとめられます。
+    ただし、1 つのタグに大量のキーを集めると特定のシャードに負荷が偏るので、会話 ID のような細かい単位で使います。
+  refs:
+    - https://learn.microsoft.com/azure/redis/architecture
+    - https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/#hash-tags
+
+- id: d-redis-lock
+  objective: "2.11"
+  type: single
+  difficulty: 3
+  tags: [redis, distributed-lock]
+  question: |
+    複数のワーカーのうち 1 つだけが、ある文書の埋め込みの再計算を行うように、Redis でロックを実装します。処理中にワーカーが落ちてもロックが永遠に残らず、他のワーカーのロックを誤って解除しないようにするには、どうしますか。
+  options:
+    - "`SET lock:doc:42 <ワーカー固有のランダム値> NX PX 60000` で取得し、解除時は値が自分のものと一致する場合だけ削除する（Lua スクリプトで比較と削除をまとめて行う）"
+    - "`SETNX lock:doc:42 1` で取得し、処理が終わったら `DEL` する"
+    - "`GET` で値がなければ `SET` する"
+    - "`INCR lock:doc:42` が 1 のときだけ処理し、TTL は付けない"
+  answer: A
+  explanation: |
+    `NX`（存在しない場合だけ設定）と `PX`（有効期限）を 1 つの `SET` で行えば、取得と期限設定が原子的になり、ワーカーが落ちても期限でロックが解放されます。値にワーカー固有のランダムな値を入れ、解除時に一致を確認してから削除する（比較と削除を Lua で原子的に行う）ことで、期限切れ後に他のワーカーが取ったロックを消す事故を防ぎます。
+    `GET` してから `SET` する方法は、その間に他のワーカーが割り込めます。
+  refs:
+    - https://redis.io/docs/latest/commands/set/
+    - https://learn.microsoft.com/azure/redis/best-practices-development
+
+- id: d-redis-scan
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, keys, scan, invalidation]
+  question: |
+    テナント `t1` のキャッシュ（キーは `cache:t1:*`、数百万個のうち約 5 万個）を無効化するため、本番で `KEYS cache:t1:*` を実行したところ、その間すべての Redis 操作が数秒間止まりました。最も適切な方法はどれですか。
+  options:
+    - "`SCAN` を `MATCH cache:t1:*` と `COUNT` 付きで繰り返して少しずつキーを取得し、`UNLINK` でまとめて削除する（または、テナントごとのキャッシュの世代番号をキー名に含め、番号を変えるだけで無効化する）"
+    - "`KEYS` を夜間に実行すればよい"
+    - "`FLUSHALL` を実行する"
+    - "`KEYS` の代わりに `MONITOR` を使う"
+  answer: A
+  explanation: |
+    `KEYS` は全キーを一度に走査するため、その間 Redis の処理が止まります。`SCAN` はカーソルで少しずつ走査するので、他の処理をブロックしません。削除には、メモリ解放をバックグラウンドで行う `UNLINK` を使うと影響が小さくなります。
+    さらに、キー名にテナントの世代番号（`cache:t1:v7:...`）を含め、無効化時は番号を上げるだけにして古いキーは TTL で消える設計にすると、大量削除自体が不要になります。
+  refs:
+    - https://redis.io/docs/latest/commands/scan/
+    - https://learn.microsoft.com/azure/redis/best-practices-development
+
+# ---------- 2.12 ----------
+- id: d-redis-vector-bytes
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, vector-search, float32]
+  question: |
+    RediSearch のベクトル フィールドを `TYPE FLOAT32 DIM 1536` で定義しています。Python で `numpy` の配列（既定の `float64`）を `tobytes()` してクエリのパラメーター `$vec` に渡すと、エラーになるか、正しい結果が返りません。原因と修正として正しいものはどれですか。
+  options:
+    - "FLOAT32 では 1 次元 4 バイト（1536 × 4 = 6,144 バイト）が必要だが、float64 では 2 倍の長さになっている。`np.asarray(vec, dtype=np.float32).tobytes()` で渡す"
+    - "ベクトルは JSON の文字列で渡す必要がある"
+    - "`DIM` を 3072 に変更する"
+    - "`DISTANCE_METRIC` を L2 に変更する"
+  answer: A
+  explanation: |
+    Hash に保存するベクトルとクエリのベクトルは、フィールドの型（FLOAT32）に合わせたバイト列である必要があります。float64 のまま渡すと長さが 12,288 バイトになり、次元数と合いません。保存時とクエリ時の両方で `float32` に変換します。
+  refs:
+    - https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/vectors/
+    - https://learn.microsoft.com/azure/redis/overview-vector-similarity
+
+- id: d-redis-ef-runtime
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, hnsw, recall]
+  question: |
+    RediSearch の HNSW ベクトル インデックス（約 200 万件）で、上位 10 件の検索結果に、総当たり（FLAT）で求めた正解の上位 10 件が平均 7 件しか含まれていません。インデックスを作り直さずに、クエリ単位で再現率を上げる方法として最も適切なものはどれですか。
+  options:
+    - "KNN クエリで `EF_RUNTIME` を大きくする（例: `*=>[KNN 10 @embedding $vec EF_RUNTIME 100]`）。遅延が増える点とのトレードオフを確認する"
+    - "`M` を大きくする"
+    - "`KNN 10` を `KNN 3` にする"
+    - "`DIALECT` を指定しない"
+  answer: A
+  explanation: |
+    HNSW の検索時に探索する候補の数は `EF_RUNTIME` で決まり、大きくするほど再現率が上がり、遅延も増えます。クエリごとに指定できるので、インデックスを作り直す必要はありません。
+    `M`（各ノードの接続数）や `EF_CONSTRUCTION` はインデックス作成時のパラメーターで、変えるには作り直しが必要です。
+  refs:
+    - https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/vectors/

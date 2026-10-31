@@ -2,7 +2,7 @@
 # 問題（questions/*.yml）の objective はここの id を参照する。
 # min_questions: 網羅チェックで要求する最低問題数（scripts/build_questions.py が検証）
 
-min_questions: 3
+min_questions: 15
 
 domains:
   - id: "1"
