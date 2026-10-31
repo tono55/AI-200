@@ -1,0 +1,629 @@
+# 分野 1 追加問題（2 周目）: ACR / ACR Tasks / App Service / Container Apps / KEDA / AKS / トラブルシューティング
+
+# ---------- 1.1 ----------
+- id: c-acr-data-endpoint-firewall
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, network, firewall]
+  question: |
+    オンプレミスのビルド サーバーから ACR `contoso.azurecr.io` に `docker pull` すると、認証とマニフェストの取得は成功しますが、レイヤーのダウンロードでタイムアウトします。社内ファイアウォールは `contoso.azurecr.io` だけを許可しています。セキュリティ チームは「`*.blob.core.windows.net` のような広いワイルドカードは許可したくない」と言っています。最も適切な対処はどれですか。
+  options:
+    - "ACR（Premium）で専用データ エンドポイントを有効にし、`contoso.<リージョン>.data.azurecr.io` をファイアウォールで許可する"
+    - "ファイアウォールで `contoso.azurecr.io` のポート 80 も許可する"
+    - "管理者ユーザーを有効にして、ユーザー名とパスワードでログインする"
+    - "イメージを小さくして、1 レイヤーにまとめる"
+  answer: A
+  explanation: |
+    pull は 2 段階です。ログイン サーバー（`<レジストリ>.azurecr.io`）が認証とマニフェストを返し、レイヤー本体は**データ エンドポイント**への 307 リダイレクトでダウンロードします。既定のデータ エンドポイントは `*.blob.core.windows.net` です。
+    **専用データ エンドポイント**（Premium）を有効にすると、データ エンドポイントが `<レジストリ>.<リージョン>.data.azurecr.io` になり、自分のレジストリだけに絞ったルールを書けます（他のストレージ アカウントへの持ち出し対策にもなります）。geo レプリケーションしている場合は、使うリージョンごとに許可します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-dedicated-data-endpoints
+    - https://learn.microsoft.com/azure/container-registry/container-registry-firewall-rules
+
+- id: c-acr-oras-model-artifact
+  objective: "1.1"
+  type: single
+  difficulty: 2
+  tags: [acr, oci-artifact, oras]
+  question: |
+    推論コンテナーとは別に、ファインチューニング済みモデルの重みファイル（数 GB）を版管理したいと考えています。イメージと同じレジストリ、同じ認証（Entra ID / RBAC）、同じタグの運用で管理したい場合、最も適切な方法はどれですか。
+  options:
+    - "ORAS などの OCI 対応ツールで、モデル ファイルを OCI 成果物として ACR にプッシュする"
+    - "モデル ファイルを Dockerfile の `ENV` に Base64 で埋め込む"
+    - "ACR のタグにモデル ファイルの内容を書き込む"
+    - "ACR はコンテナー イメージ以外を保存できないため、別のレジストリ製品を使う"
+  answer: A
+  explanation: |
+    ACR は OCI 準拠のレジストリなので、コンテナー イメージ以外の**OCI 成果物**（Helm チャート、署名、SBOM、任意のファイルなど）も保存できます。ORAS CLI で `oras push contoso.azurecr.io/models/llm:v3 ./weights.bin` のようにプッシュすれば、イメージと同じリポジトリ・タグ・RBAC・geo レプリケーションの仕組みで管理できます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-manage-artifact
+    - https://learn.microsoft.com/azure/container-registry/container-registry-image-formats
+
+- id: c-acr-anonymous-pull
+  objective: "1.1"
+  type: yesno
+  difficulty: 2
+  tags: [acr, anonymous-pull, security]
+  question: |
+    社外の利用者に、サンプルの推論イメージを認証なしで `docker pull` できるようにしたいと考え、`az acr update --name contoso --anonymous-pull-enabled` を検討しています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "有効にすると、レジストリ内のすべてのリポジトリが匿名でプルできるようになる（リポジトリ単位では選べない）。"
+      answer: true
+    - text: "有効にしても、匿名の利用者はイメージをプッシュできない。"
+      answer: true
+    - text: "社内専用イメージも同じレジストリにあるなら、公開用のレジストリを分けるのが安全である。"
+      answer: true
+  explanation: |
+    匿名プルはレジストリ全体の設定で、すべてのリポジトリが対象になります。許可されるのはプル（読み取り）だけです。公開したくないイメージがあるなら、公開用と社内用でレジストリを分けます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/anonymous-pull-access
+
+# ---------- 1.2 ----------
+- id: c-acrtask-purge-schedule
+  objective: "1.2"
+  type: dropdown
+  difficulty: 3
+  tags: [acr-tasks, purge, schedule]
+  question: |
+    CI が毎回 `{{.Run.ID}}` タグでイメージをプッシュするため、レジストリの容量が増え続けています。毎日 UTC 1 時に、30 日より古いタグを削除し（各リポジトリで最新 5 つは残す）、タグのないマニフェストも削除するタスクを作ります。空欄を埋めてください。
+  language: bash
+  template: |
+    PURGE_CMD="acr purge --filter 'inference:.*' --ago {{1}} --keep 5 {{2}}"
+
+    az acr task create --name nightly-purge --registry contoso \
+      --cmd "$PURGE_CMD" \
+      --schedule "{{3}}" \
+      --context {{4}}
+  blanks:
+    "1":
+      options: ["30d", "720", "P30D", "30"]
+      answer: "30d"
+    "2":
+      options: ["--untagged", "--dry-run", "--all", "--force"]
+      answer: "--untagged"
+    "3":
+      options: ["0 1 * * *", "1 0 * * *", "* 1 * * *", "@hourly"]
+      answer: "0 1 * * *"
+    "4":
+      options: ["/dev/null", ".", "https://github.com/contoso/app.git", "--no-context"]
+      answer: "/dev/null"
+  explanation: |
+    `acr purge` は ACR Tasks で動かすコンテナー コマンドです。`--ago` は Go の期間形式（`30d`、`2h` など）、`--keep` は最新 N 個を残す、`--untagged` はタグを外されたマニフェストも削除します。最初は `--dry-run` で削除対象を確認するのが安全です。
+    タイマーは cron 式で UTC です（「分 時 日 月 曜日」なので UTC 1 時は `0 1 * * *`）。ソースが不要なので `--context /dev/null` を指定します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-auto-purge
+
+- id: c-acrtask-dockerignore
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, quick-build, dockerignore]
+  question: |
+    開発者のリポジトリには、ローカル検証用のモデル ファイル（`./models/` に 6 GB）と `.venv/` があります。Dockerfile ではこれらを使わず、モデルは実行時にダウンロードします。`az acr build -r contoso -t api:dev .` を実行すると、ビルドが始まる前の「ソースのアップロード」に毎回 10 分以上かかります。最も効果的な対処はどれですか。
+  options:
+    - "`.dockerignore` に `models/` と `.venv/` を追加する"
+    - "`--platform linux/arm64` を指定する"
+    - "レジストリを Premium に上げる"
+    - "Dockerfile の先頭に `FROM scratch` を追加する"
+  answer: A
+  explanation: |
+    `az acr build` は、指定したコンテキスト（ここでは `.`）を tar にまとめて Azure にアップロードしてからビルドします。アップロードの対象からは `.dockerignore` に書いたものが除外されます。ビルドに不要な大きなファイルを除外すれば、アップロード時間とビルド コンテキストの両方が小さくなります。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tutorial-quick-task
+    - https://learn.microsoft.com/cli/azure/acr#az-acr-build
+
+# ---------- 1.3 ----------
+- id: c-appsvc-sidecar-localhost
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, sidecar, opentelemetry]
+  question: |
+    App Service（Linux、カスタム コンテナー、サイドカー有効）のメイン コンテナーで動く API から、サイドカーとして追加した OpenTelemetry Collector（`otel-collector`、OTLP/HTTP の 4318 番で待ち受け）にテレメトリを送ります。API の `OTEL_EXPORTER_OTLP_ENDPOINT` に設定する値として正しいものはどれですか。
+  options:
+    - "`http://localhost:4318`"
+    - "`http://otel-collector:4318`"
+    - "`https://<アプリ名>.azurewebsites.net:4318`"
+    - "`http://otel-collector.internal:80`"
+  answer: A
+  explanation: |
+    App Service のサイドカーは、メイン コンテナーと**同じネットワーク名前空間**を共有します（Kubernetes の Pod と同じ考え方）。そのため `localhost:<ポート>` で通信し、Docker Compose のようなコンテナー名での名前解決はできません。
+    各コンテナーは別々のポートで待ち受ける必要があり、外部からの HTTP を受けるのはメイン コンテナーだけです。サイドカーはメインと一緒に起動・停止・スケールします。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/overview-sidecar
+    - https://learn.microsoft.com/azure/app-service/configure-sidecar
+
+- id: c-appsvc-vnet-integration
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, vnet-integration, private-endpoint]
+  question: |
+    App Service のコンテナー アプリから、プライベート エンドポイントだけを公開している Cosmos DB（パブリック アクセス無効）に接続したいと考えています。App Service 自体はインターネットから呼び出せるままにします。必要な構成はどれですか。
+  options:
+    - "App Service で VNet 統合（送信）を構成し、プライベート DNS ゾーンを VNet にリンクして Cosmos DB の名前をプライベート IP に解決させる"
+    - "App Service にプライベート エンドポイントを作成する"
+    - "Cosmos DB の接続文字列を Key Vault 参照にする"
+    - "App Service のアクセス制限で Cosmos DB の IP を許可する"
+  answer: A
+  explanation: |
+    方向で考えます。**VNet 統合**は App Service から VNet への**送信**を可能にし、App Service の**プライベート エンドポイント**は VNet から App Service への**受信**を可能にします。Cosmos DB へ出ていく通信なので VNet 統合が必要です。
+    さらに `<アカウント>.documents.azure.com` をプライベート IP に解決するため、`privatelink.documents.azure.com` のプライベート DNS ゾーンを VNet にリンクします。アクセス制限は App Service への受信を制御するもので、送信には関係しません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/overview-vnet-integration
+    - https://learn.microsoft.com/azure/app-service/networking/private-endpoint
+
+- id: c-appsvc-swap-order
+  objective: "1.3"
+  type: order
+  difficulty: 3
+  tags: [app-service, deployment-slot, swap]
+  question: |
+    App Service で staging スロットから production スロットへスワップするとき、プラットフォームが行う処理を順に並べてください。
+  items:
+    - "production スロットの「スロット固有」の設定（スティッキー設定）を staging のインスタンスに適用し、staging を再起動する"
+    - "staging のすべてのインスタンスが起動・ウォームアップ（ヘルス チェックや初期化要求への応答）を終えるまで待つ"
+    - "2 つのスロットのルーティング（ホスト名）を入れ替える"
+    - "元の production のアプリは staging スロットに移り、staging の設定が適用される"
+  distractors:
+    - "production のインスタンスをすべて停止してからイメージを再プルする"
+  explanation: |
+    スワップは、まず production の設定を staging に適用してウォームアップしてから、ルーティングを入れ替えます。このため、入れ替えの瞬間には新しいバージョンがすでに production の設定で起動済みで、ダウンタイムが発生しません。
+    スロット固有にした設定（接続先など）は移動しないので、「スワップ後に staging 用の DB を見てしまう」事故を防げます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/deploy-staging-slots
+
+# ---------- 1.4 ----------
+- id: c-aca-sticky-sessions
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, ingress, session-affinity]
+  question: |
+    会話の状態をレプリカのメモリに保持するチャット アプリを Container Apps で動かしています。同じクライアントの要求を同じレプリカに送るため、セッション アフィニティ（`ingress.stickySessions.affinity: sticky`）を有効にしようとしましたが、設定できません。アプリは複数リビジョン モードで、80:20 のトラフィック分割を行っています。原因として正しいものはどれですか。
+  options:
+    - "セッション アフィニティは、単一リビジョン モードかつ HTTP イングレスのときだけサポートされる"
+    - "セッション アフィニティは外部イングレスでは使えない"
+    - "最小レプリカ数が 0 だから"
+    - "Dapr を有効にしていないから"
+  answer: A
+  explanation: |
+    セッション アフィニティは Cookie で同じレプリカに振り分ける機能で、**単一リビジョン モード**かつ **HTTP イングレス**のときに使えます。
+    また、レプリカが無くなれば別のレプリカに振り分けられるので、状態をレプリカのメモリだけに持つ設計は脆弱です。会話の状態は Redis や Cosmos DB など外部に置くのが基本です。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/sticky-sessions
+
+- id: c-aca-latest-revision-weight
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, revisions, traffic-splitting]
+  question: |
+    複数リビジョン モードのアプリで、トラフィック設定が `[{latestRevision: true, weight: 100}]` になっています。次のリリースでは、新しいリビジョンをデプロイしてもすぐには本番トラフィックを流さず、ラベルの URL で確認してから切り替えたいと考えています。デプロイ前に何をしておくべきですか。
+  options:
+    - "トラフィックを `latestRevision` ではなく、現在のリビジョン名に 100% 固定しておく"
+    - "単一リビジョン モードに戻す"
+    - "`maxReplicas` を 0 にしておく"
+    - "イングレスを内部に変更しておく"
+  answer: A
+  explanation: |
+    `latestRevision: true` は「常に最新のリビジョン」を指すので、新しいリビジョンが準備できた時点でトラフィックがそちらに移ります。事前に `az containerapp ingress traffic set --revision-weight <現行リビジョン名>=100` のように**特定のリビジョン名**へ固定しておけば、新しいリビジョンはトラフィック 0% のまま起動し、ラベルの URL で確認してから重みを変えられます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/traffic-splitting
+    - https://learn.microsoft.com/azure/container-apps/revisions
+
+- id: c-aca-init-container
+  objective: "1.4"
+  type: yesno
+  difficulty: 2
+  tags: [container-apps, init-container]
+  question: |
+    推論アプリの起動前に、Blob Storage からモデル ファイルを共有ボリューム（`EmptyDir`）にダウンロードする処理を、Container Apps の**初期化コンテナー**（`initContainers`）で実装します。次の記述が正しいかを答えてください。
+  statements:
+    - text: "初期化コンテナーが正常に終了するまで、アプリのコンテナーは起動しない。"
+      answer: true
+    - text: "初期化コンテナーは、アプリのコンテナーと並行して動き続けるサイドカーとして使うのが目的である。"
+      answer: false
+    - text: "初期化コンテナーとアプリのコンテナーで同じボリュームをマウントすれば、ダウンロードしたファイルを受け渡せる。"
+      answer: true
+    - text: "初期化コンテナーが失敗し続けると、そのレプリカは準備完了にならない。"
+      answer: true
+  explanation: |
+    初期化コンテナーは、アプリのコンテナーより前に順に実行され、**完了してから**アプリのコンテナーが起動します。前処理（モデルのダウンロード、DB のマイグレーションなど）に使います。並行して動き続けるのはサイドカーです。ファイルの受け渡しには、両方に同じボリュームをマウントします。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/containers
+
+- id: c-aca-keyvault-secret-cli
+  objective: "1.4"
+  type: dropdown
+  difficulty: 3
+  tags: [container-apps, secrets, key-vault]
+  question: |
+    Container Apps のシステム割り当てマネージド ID は有効で、Key Vault の「Key Vault Secrets User」ロールも付与済みです。Key Vault のシークレット `openai-key` を Container Apps のシークレットとして参照し、環境変数 `OPENAI_API_KEY` に渡します。空欄を埋めてください。
+  language: bash
+  template: |
+    az containerapp secret set -n api -g rg-ai \
+      --secrets "openai-key={{1}}:https://kv-ai.vault.azure.net/secrets/openai-key,{{2}}:system"
+
+    az containerapp update -n api -g rg-ai \
+      --set-env-vars "OPENAI_API_KEY={{3}}:openai-key"
+  blanks:
+    "1":
+      options: ["keyvaultref", "@Microsoft.KeyVault", "kvsecret", "secretref"]
+      answer: "keyvaultref"
+    "2":
+      options: ["identityref", "identity", "managedidentity", "clientid"]
+      answer: "identityref"
+    "3":
+      options: ["secretref", "keyvaultref", "@Microsoft.KeyVault", "env"]
+      answer: "secretref"
+  explanation: |
+    Container Apps の Key Vault 参照は `<名前>=keyvaultref:<シークレット URI>,identityref:<system または ID のリソース ID>` の形式です。環境変数からは `secretref:<シークレット名>` で参照します。
+    `@Microsoft.KeyVault(...)` は App Service / Functions のアプリ設定で使う構文なので混同しないようにします。バージョンなしの URI を使うと、ローテーション後の新しいバージョンが（一定時間内に）取り込まれます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/manage-secrets
+
+# ---------- 1.5 ----------
+- id: c-keda-identity-auth
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, managed-identity]
+  question: |
+    ワーカーは Service Bus にマネージド ID で接続しており、接続文字列は使っていません。ところがスケール ルールの例を見ると、どれも `auth` に接続文字列のシークレットを指定しています。シークレットを使わずにスケール ルールを構成する方法として、最も適切なものはどれですか。
+  options:
+    - "スケール ルールの `identity` に、アプリに割り当てたマネージド ID（`system` またはユーザー割り当て ID のリソース ID）を指定し、その ID に Service Bus の読み取りに必要なロールを付与する"
+    - "スケール ルールは必ず接続文字列が必要なので、SAS キーを環境変数に平文で入れる"
+    - "スケール ルールを使わず、CPU ルールだけでスケールする"
+    - "Service Bus のローカル認証を有効にし、ルート キーを `metadata` に書く"
+  answer: A
+  explanation: |
+    Container Apps のカスタム スケール ルールは `identity` プロパティでマネージド ID を使えます（CLI では `--scale-rule-identity`）。スケーラーはその ID でキューの長さを読み取るので、ID に適切なロール（キューのメトリック取得に必要なデータ プレーンのロール）を付与します。
+    CPU ルールはキューの滞留を見ないので、イベント ドリブンなスケールの代わりにはなりません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-eventhub-partitions
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, event-hubs]
+  question: |
+    Event Hubs（パーティション 8 個）のイベントを処理するワーカーを、KEDA の Event Hubs スケーラーでスケールさせています。処理が追いつかないので `maxReplicas` を 8 から 30 に上げましたが、スループットはほとんど変わりませんでした。最も可能性の高い理由はどれですか。
+  options:
+    - "1 つのコンシューマー グループでは、1 パーティションを同時に読めるのは 1 つのコンシューマーだけなので、パーティション数（8）を超えたレプリカは働けない"
+    - "Event Hubs スケーラーは最大 10 レプリカまでしかサポートしない"
+    - "`maxReplicas` を変えるとリビジョンが作られないため、設定が反映されない"
+    - "Event Hubs はプル型ではないため、レプリカを増やしても意味がない"
+  answer: A
+  explanation: |
+    Event Hubs の並列度の上限は**パーティション数**です。同じコンシューマー グループでは、各パーティションの所有者（チェックポイントを持つ読み取り側）は 1 つなので、パーティション数を超えるレプリカはアイドルになります。
+    並列度を上げるには、パーティション数を増やす（Premium / Dedicated では後から増やせる）、1 レプリカ内でバッチ処理や非同期処理で効率を上げる、などを検討します。Service Bus のキューのような「競合コンシューマー」とはここが違います。
+  refs:
+    - https://learn.microsoft.com/azure/event-hubs/event-hubs-scalability
+    - https://keda.sh/docs/latest/scalers/azure-event-hub/
+
+- id: c-keda-scale-in-shutdown
+  objective: "1.5"
+  type: yesno
+  difficulty: 3
+  tags: [container-apps, keda, graceful-shutdown, service-bus]
+  question: |
+    Service Bus のメッセージを 1 件あたり最大 3 分かけて処理するワーカーを、Container Apps のアプリ（ジョブではない）として KEDA でスケールしています。キューが空になってスケール インしたとき、処理中のメッセージが途中で止まることがあります。次の記述が正しいかを答えてください。
+  statements:
+    - text: "スケール インでは、レプリカに SIGTERM が送られ、猶予期間（`terminationGracePeriodSeconds`）を過ぎると強制終了される。"
+      answer: true
+    - text: "PeekLock で受信していれば、処理途中で強制終了されたメッセージはロックの期限切れ後に再配信される。"
+      answer: true
+    - text: "SIGTERM を受け取ったら新しいメッセージの受信をやめ、処理中のものを終えてから終了するように実装するとよい。"
+      answer: true
+    - text: "処理の途中で終了されても、メッセージは必ず失われるので、べき等な処理は不要である。"
+      answer: false
+  explanation: |
+    スケール インでは SIGTERM → 猶予期間 → 強制終了の順で止まります。SIGTERM を受けて受信を止め、処理中のメッセージを完了させる（グレースフル シャットダウン）のが基本です。猶予期間は処理時間に合わせて延ばせます。
+    PeekLock なら、完了していないメッセージはロックの期限切れ後に再配信されるため失われませんが、**同じメッセージが 2 回処理される**可能性があるので、処理はべき等にします。1 件の処理が非常に長い場合は、イベント ドリブンのジョブにする選択肢もあります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+
+- id: c-keda-servicebus-topic
+  objective: "1.5"
+  type: dropdown
+  difficulty: 2
+  tags: [container-apps, keda, service-bus, topic]
+  question: |
+    トピック `orders` のサブスクリプション `embedding-worker` に、1 レプリカあたり 10 件を目安にスケールするルールを作ります。空欄を埋めてください。
+  language: yaml
+  template: |
+    rules:
+      - name: sb-topic
+        custom:
+          type: azure-servicebus
+          metadata:
+            namespace: sb-contoso
+            {{1}}: orders
+            {{2}}: embedding-worker
+            {{3}}: "10"
+          identity: system
+  blanks:
+    "1":
+      options: ["topicName", "queueName", "entityPath", "topic"]
+      answer: "topicName"
+    "2":
+      options: ["subscriptionName", "consumerGroup", "subscription", "queueName"]
+      answer: "subscriptionName"
+    "3":
+      options: ["messageCount", "queueLength", "concurrentRequests", "targetValue"]
+      answer: "messageCount"
+  explanation: |
+    Service Bus スケーラーは、キューなら `queueName`、トピックなら `topicName` と `subscriptionName` を指定します。`messageCount` は 1 レプリカあたりの目標メッセージ数です。`queueLength` は Storage キューのスケーラー、`consumerGroup` は Event Hubs のスケーラーで使うパラメーターです。
+  refs:
+    - https://keda.sh/docs/latest/scalers/azure-service-bus/
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-gpu-concurrency
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, http-scaling, gpu]
+  question: |
+    GPU ワークロード プロファイルで動く推論 API は、GPU メモリの都合で 1 レプリカあたり同時 4 リクエストまでしか処理できません。それ以上は待ち行列が伸び、遅延が急増します。HTTP スケール ルールの `concurrentRequests` をどう設定するのが適切ですか。
+  options:
+    - "4（またはそれより少し小さい値）にして、1 レプリカの処理能力を超える前にスケール アウトさせる"
+    - "既定の 10 のままにする"
+    - "100 にして、レプリカ数を減らしてコストを下げる"
+    - "1 にすると最も速いので、常に 1 にする"
+  answer: A
+  explanation: |
+    HTTP スケール ルールは「1 レプリカあたりの同時リクエスト数」がしきい値を超えるとスケール アウトします。しきい値は**1 レプリカが遅延を悪化させずに処理できる量**に合わせます。既定の 10 では、4 を超えた分が待ち行列になってもスケールしません。
+    逆に小さくしすぎると、必要以上にレプリカが増えて GPU のコストが上がります。新しいレプリカの起動（モデルの読み込み）にも時間がかかるので、`minReplicas` で余裕を持たせることも検討します。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+# ---------- 1.6 ----------
+- id: c-aks-pdb
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, pdb, upgrade]
+  question: |
+    AKS のノード イメージのアップグレード中に、推論 API（`replicas: 3`）の Pod が同時に 2 つ退避され、一時的に容量不足になりました。アップグレードなどの**自発的な中断**のときに、少なくとも 2 つの Pod が常に動いている状態を保つには、何を作成しますか。
+  options:
+    - "`minAvailable: 2` の PodDisruptionBudget（対象 Pod をラベル セレクターで指定）"
+    - "`maxUnavailable: 0` の Deployment の RollingUpdate 設定"
+    - "HorizontalPodAutoscaler の `minReplicas: 2`"
+    - "`priorityClassName` を高く設定した Pod"
+  answer: A
+  explanation: |
+    **PodDisruptionBudget（PDB）** は、ノードのドレイン（アップグレード、スケール ダウン、メンテナンス）などの自発的な中断で、同時に退避できる Pod の数を制限します。`minAvailable: 2` なら、2 つを下回る退避は待たされます。
+    Deployment の `maxUnavailable` は**イメージ更新などのロールアウト**のときだけ効き、ノードのドレインには効きません。PDB を厳しくしすぎる（例: `replicas: 1` で `minAvailable: 1`）とドレインが進まなくなる点にも注意します。
+  refs:
+    - https://learn.microsoft.com/azure/aks/operator-best-practices-scheduler
+    - https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
+
+- id: c-aks-gpu-taint
+  objective: "1.6"
+  type: multiple
+  difficulty: 3
+  tags: [aks, gpu, taints, node-pool]
+  question: |
+    AKS に GPU ノード プールを追加し、テイント `sku=gpu:NoSchedule` を付けました。推論 Pod だけを GPU ノードに配置し、他の Pod が GPU ノードに入らないようにします。推論 Pod のマニフェストで必要なものを **2 つ**選んでください。
+  options:
+    - "テイント `sku=gpu:NoSchedule` に対応する `tolerations`"
+    - "GPU ノード プールのラベルを指定する `nodeSelector`（またはノード アフィニティ）"
+    - "推論 Pod 以外のすべての Pod に、`sku=gpu` を拒否する `tolerations`"
+    - "`hostNetwork: true`"
+  answer: [A, B]
+  explanation: |
+    **テイント**は「許容（toleration）を持たない Pod を拒否する」仕組みなので、他の Pod が GPU ノードに入るのを防げます。ただし許容は「入ってもよい」というだけで、「そこに入る」ことは保証しません。そのため推論 Pod には、許容に加えて **nodeSelector（またはノード アフィニティ）** で GPU ノードを指定します。
+    他の Pod に何かを書く必要はありません（許容がなければ自動的に拒否されます）。GPU を使うには `resources.limits` に `nvidia.com/gpu` を指定することも必要です。
+  refs:
+    - https://learn.microsoft.com/azure/aks/use-node-taints
+    - https://learn.microsoft.com/azure/aks/gpu-cluster
+
+- id: c-aks-cronjob
+  objective: "1.6"
+  type: dropdown
+  difficulty: 2
+  tags: [aks, cronjob]
+  question: |
+    毎時 0 分に、更新された文書の埋め込みを再計算するバッチを AKS で実行します。前回の実行がまだ終わっていなければ新しい実行は始めず、失敗した Pod は再起動せずに Job として再試行（最大 2 回）させます。空欄を埋めてください。
+  language: yaml
+  template: |
+    apiVersion: batch/v1
+    kind: {{1}}
+    metadata:
+      name: reembed
+    spec:
+      schedule: "0 * * * *"
+      concurrencyPolicy: {{2}}
+      jobTemplate:
+        spec:
+          backoffLimit: 2
+          template:
+            spec:
+              restartPolicy: {{3}}
+              containers:
+                - name: reembed
+                  image: contoso.azurecr.io/reembed:1.4.0
+  blanks:
+    "1":
+      options: ["CronJob", "Job", "Deployment", "ScheduledJob"]
+      answer: "CronJob"
+    "2":
+      options: ["Forbid", "Allow", "Replace", "Never"]
+      answer: "Forbid"
+    "3":
+      options: ["Never", "Always", "OnFailure", "Forbid"]
+      answer: "Never"
+  explanation: |
+    定期実行は **CronJob** です。`concurrencyPolicy: Forbid` は前回の Job が実行中なら新しい Job を作らず、`Replace` は前回を止めて新しく始め、`Allow`（既定）は同時実行を許します。
+    Job の Pod では `restartPolicy` に `Always` は使えません。`Never` なら失敗した Pod は再起動されず、`backoffLimit` の回数まで新しい Pod で再試行されます（`OnFailure` は同じ Pod 内でコンテナーを再起動します）。
+  refs:
+    - https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+    - https://kubernetes.io/docs/concepts/workloads/controllers/job/
+
+- id: c-aks-autoscaler-match
+  objective: "1.6"
+  type: match
+  difficulty: 2
+  tags: [aks, autoscaling]
+  question: |
+    AKS の状況と、それに対応するスケーリングの仕組みを対応付けてください。
+  pairs:
+    - left: "CPU 使用率が上がったので Pod の数を増やしたい"
+      right: "Horizontal Pod Autoscaler（HPA）"
+    - left: "Pod が `Pending`（Insufficient cpu）のままなので、ノードを増やしたい"
+      right: "クラスター オートスケーラー（ノード自動プロビジョニングを含む）"
+    - left: "Service Bus キューの長さに応じて Pod を 0 から増やしたい"
+      right: "KEDA アドオン"
+  distractors:
+    - "PodDisruptionBudget"
+  explanation: |
+    HPA は Pod の数をメトリック（CPU・メモリなど）で調整し、クラスター オートスケーラーはスケジュールできない Pod があるときにノードを追加します（不要になれば減らします）。両者は組み合わせて使います。
+    外部のイベント ソース（キューなど）に基づくスケールや 0 へのスケールには KEDA を使います（KEDA は内部で HPA を作成します）。
+  refs:
+    - https://learn.microsoft.com/azure/aks/concepts-scale
+    - https://learn.microsoft.com/azure/aks/keda-about
+
+# ---------- 1.7 ----------
+- id: c-trouble-exit-codes
+  objective: "1.7"
+  type: match
+  difficulty: 2
+  tags: [aks, container-apps, troubleshooting, exit-code]
+  question: |
+    `kubectl describe pod` の Last State に表示された終了理由・終了コードと、その意味を対応付けてください。
+  pairs:
+    - left: "Reason: OOMKilled / Exit Code: 137"
+      right: "メモリの上限を超えたため強制終了された"
+    - left: "Exit Code: 143"
+      right: "SIGTERM を受けて終了した（停止要求に従った終了）"
+    - left: "Reason: Error / Exit Code: 1"
+      right: "アプリ自身が異常終了した（例外、設定不足など）"
+    - left: "Reason: Completed / Exit Code: 0"
+      right: "正常に終了した（常駐すべきプロセスなら、すぐ終了してしまう作りが問題）"
+  distractors:
+    - "イメージのプルに失敗した"
+  explanation: |
+    128 を超える終了コードは「128 + シグナル番号」で、137 は SIGKILL（9）、143 は SIGTERM（15）です。OOMKilled なら limits の見直しやメモリ使用量の削減、Exit Code 1 ならログ（`--previous`）で例外を確認します。
+    Deployment のコンテナーが Exit Code 0 で終わって再起動を繰り返す場合は、フォアグラウンドで動き続けないエントリポイントが原因のことが多いです。イメージのプル失敗は終了コードではなく `ImagePullBackOff` などの待機理由で表れます。
+  refs:
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/pod-stuck-crashloopbackoff-mode
+    - https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/
+
+- id: c-trouble-endpoints-not-ready
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, service, readiness, troubleshooting]
+  question: |
+    Service `api` の selector と Pod のラベルは一致しており、Pod は `Running` で再起動もしていません。しかし `kubectl get endpointslices -l kubernetes.io/service-name=api` を見ると、利用可能なエンドポイントがありません。Service 経由の呼び出しは接続に失敗します。最も可能性の高い原因はどれですか。
+  options:
+    - "readiness プローブが失敗しており、Pod が `READY 0/1` のため Service の振り分け先に入っていない"
+    - "Pod のメモリ上限が小さすぎる"
+    - "Service の `type` が ClusterIP だから"
+    - "名前空間に ResourceQuota が設定されているから"
+  answer: A
+  explanation: |
+    Service が振り分けるのは、selector に一致し、かつ**準備完了（Ready）**の Pod だけです。`Running` でも readiness プローブが失敗していれば振り分け先から外れます。`kubectl get pods` の READY 列と、`kubectl describe pod` の Events（`Readiness probe failed`）を確認し、プローブのパスやポート、初期遅延を見直します。
+    liveness と違い、readiness の失敗ではコンテナーは再起動されないので、「再起動していないのに呼べない」という症状になります。
+  refs:
+    - https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+    - https://kubernetes.io/docs/concepts/services-networking/service/
+
+- id: c-trouble-pvc-zone
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, storage, availability-zones, troubleshooting]
+  question: |
+    3 つの可用性ゾーンにまたがる AKS クラスターで、Azure Disk の PersistentVolume を使う StatefulSet の Pod を再作成したところ、`Pending` のままになりました。Events には `volume node affinity conflict` と表示されています。ディスクはゾーン 1 で作成されており、ゾーン 1 のノードは現在すべて満杯です。原因と対処として最も適切なものはどれですか。
+  options:
+    - "Azure Disk（LRS）はゾーンに固定されるため、ゾーン 1 のノードにしか接続できない。ゾーン 1 に容量を追加するか、ZRS のディスク（ZRS のストレージ クラス）を使う"
+    - "PVC の `accessModes` を ReadWriteMany に変えれば、どのゾーンでも接続できる"
+    - "Pod を削除し続ければ、いずれ別ゾーンにディスクが自動で移動する"
+    - "Service の type を LoadBalancer にする"
+  answer: A
+  explanation: |
+    LRS の Azure Disk は作成されたゾーンに固定され、PersistentVolume にはそのゾーンのノード アフィニティが付きます。そのため Pod はそのゾーンのノードにしか配置できません。ノード プールのオートスケールをゾーンごとに効くように構成する、またはゾーン冗長（ZRS）のディスクを使うことで回避します。
+    Azure Disk は RWX をサポートしないので、アクセス モードを変えても解決しません（共有が必要なら Azure Files などを使います）。
+  refs:
+    - https://learn.microsoft.com/azure/aks/availability-zones
+    - https://learn.microsoft.com/azure/aks/azure-csi-disk-storage-provision
+
+- id: c-trouble-kubectl-debug
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, troubleshooting, kubectl-debug, distroless]
+  question: |
+    distroless イメージで動く Pod から Cosmos DB への接続が失敗しています。名前解決や疎通を調べたいのですが、イメージにシェルも `nslookup` もないため `kubectl exec` で調べられません。Pod を作り直さずに、その Pod のネットワーク名前空間で調査用のツールを使う方法として最も適切なものはどれですか。
+  options:
+    - "`kubectl debug -it <pod> --image=<調査ツール入りのイメージ> --target=<コンテナー名>` でエフェメラル コンテナーを追加する"
+    - "本番イメージにシェルと調査ツールを追加して再デプロイする"
+    - "`kubectl logs --previous` を実行する"
+    - "ノードに SSH して、Pod の IP に ping を打つ"
+  answer: A
+  explanation: |
+    `kubectl debug` は実行中の Pod に**エフェメラル コンテナー**を追加します。同じ Pod 内なのでネットワーク名前空間を共有し、`nslookup` や `curl` で Pod から見た名前解決（プライベート DNS が効いているか）や疎通を確認できます。`--target` を付けるとプロセス名前空間も共有できます。
+    本番イメージを調査のために変えるのは避けます。ノードからの確認では、Pod 内の DNS 設定やネットワーク ポリシーの影響を再現できません。
+  refs:
+    - https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/basic-troubleshooting-outbound-connections
+
+- id: c-trouble-aca-console-kql
+  objective: "1.7"
+  type: dropdown
+  difficulty: 2
+  tags: [container-apps, log-analytics, kql]
+  question: |
+    Container Apps 環境のログは Log Analytics に送られています。アプリ `api` の標準出力のうち、直近 1 時間に `Timeout` を含むものをリビジョンごとに数えるクエリを完成させてください。
+  language: kql
+  template: |
+    {{1}}
+    | where TimeGenerated > ago(1h)
+    | where ContainerAppName_s == "api"
+    | where {{2}} has "Timeout"
+    | summarize count() by {{3}}
+  blanks:
+    "1":
+      options: ["ContainerAppConsoleLogs_CL", "ContainerAppSystemLogs_CL", "ContainerLogV2", "AppRequests"]
+      answer: "ContainerAppConsoleLogs_CL"
+    "2":
+      options: ["Log_s", "Message", "ResultDescription", "Reason_s"]
+      answer: "Log_s"
+    "3":
+      options: ["RevisionName_s", "ContainerImage_s", "Computer", "ReplicaCount"]
+      answer: "RevisionName_s"
+  explanation: |
+    アプリの標準出力・標準エラーは `ContainerAppConsoleLogs_CL`、プラットフォームのイベント（プローブ失敗、イメージ プル、スケールなど）は `ContainerAppSystemLogs_CL` に入ります。カスタム ログ形式のテーブルなので列名に `_s` などの型サフィックスが付き、ログ本文は `Log_s`、リビジョンは `RevisionName_s` です。
+    `ContainerLogV2` は AKS（Container Insights）のテーブルです。リビジョンごとに数えれば、新しいリビジョンでだけエラーが増えたかどうかがわかります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/log-monitoring
+    - https://learn.microsoft.com/azure/container-apps/logging
+
+- id: c-trouble-image-pull-errors
+  objective: "1.7"
+  type: match
+  difficulty: 3
+  tags: [aks, acr, image-pull, troubleshooting]
+  question: |
+    AKS の Pod が `ImagePullBackOff` になりました。`kubectl describe pod` の Events に出たエラー メッセージと、最も可能性の高い原因を対応付けてください。
+  pairs:
+    - left: "`manifest unknown` / `not found`"
+      right: "指定したリポジトリ名またはタグがレジストリに存在しない（タグの誤り、プッシュ漏れ）"
+    - left: "`401 Unauthorized` / `authentication required`"
+      right: "kubelet の ID に AcrPull ロールがない（ACR がクラスターに接続されていない）"
+    - left: "レイヤーのダウンロードで `dial tcp ...:443: i/o timeout`"
+      right: "ファイアウォールでデータ エンドポイント（`*.blob.core.windows.net` や専用データ エンドポイント）が許可されていない"
+    - left: "`no match for platform in manifest`"
+      right: "ノードの CPU アーキテクチャ（例: arm64）用のイメージが含まれていない"
+  distractors:
+    - "Pod のメモリ上限が小さすぎる"
+  explanation: |
+    エラー メッセージで原因を切り分けます。タグがなければ `manifest unknown`、権限がなければ `401`（`az aks check-acr` で確認でき、`az aks update --attach-acr` で AcrPull を付与）、ネットワークでレイヤーだけ失敗するならデータ エンドポイントの許可漏れ、アーキテクチャの不一致ならマルチアーキテクチャのイメージをビルドします。
+    メモリ不足はイメージのプルではなく実行時（OOMKilled）の問題です。
+  refs:
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/cannot-pull-image-from-acr-to-aks-cluster
