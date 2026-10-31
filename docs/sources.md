@@ -38,15 +38,17 @@
 
 | 項目 | 状況 |
 |---|---|
-| 日本語での受験 | 受験者の報告（2026 年 8 月に日本語化）はあるが、公式ページに言語一覧がない。申し込み画面で確認 |
+| 日本語での受験 | 日本語版のスタディガイドと認定ページは公開済み（出題範囲の公式日本語訳は [01-skills-outline.md](01-skills-outline.md) に反映）。受験者の報告（2026 年 8 月に日本語化）もあるが、提供言語の一覧は公式ページの動的部分にあり取得できなかった。申し込み画面で確認 |
 | 受験料（日本円） | 米国は USD 165。日本の価格は申し込み画面で確認 |
 | AI-200 のラーニングパス名 | 第三者の整理に基づく。Microsoft Learn の検索ではまだ確認できていない |
 | ベータ開始 / GA の正確な日付 | 第三者資料では 2026 年 5 月にベータ、7 月に GA |
 
 ## 一次情報（Microsoft）
 
-- [Study guide for Exam AI-200: Developing AI Cloud Solutions on Azure](https://learn.microsoft.com/credentials/certifications/resources/study-guides/ai-200)
-- [Microsoft Certified: Azure AI Cloud Developer Associate](https://learn.microsoft.com/credentials/certifications/azure-ai-cloud-developer-associate/)
+- [Study guide for Exam AI-200: Developing AI Cloud Solutions on Azure](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-200)
+- [試験 AI-200 の学習ガイド: Azureでの AI クラウド ソリューションの開発（日本語版）](https://learn.microsoft.com/ja-jp/credentials/certifications/resources/study-guides/ai-200)
+- [Microsoft Certified: Azure AI Cloud Developer Associate](https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-cloud-developer-associate/)
+- [Microsoft 認定: Azure AI クラウド 開発者アソシエイト（日本語版）](https://learn.microsoft.com/ja-jp/credentials/certifications/azure-ai-cloud-developer-associate/)
 - [AI-200 Practice Assessment（AI Skills Navigator）](http://aka.ms/AI200-PA)
 - [Exam Readiness Zone（AI-200）](https://aka.ms/AI200-ExamPrep)
 - [Study guide for Exam AZ-204（廃止のお知らせと最終版の出題範囲）](https://learn.microsoft.com/credentials/certifications/resources/study-guides/az-204)

@@ -7,16 +7,16 @@
 | 項目 | 内容 | 確度 |
 |---|---|---|
 | 試験コード | AI-200 | [公式] |
-| 試験名 | Developing AI Cloud Solutions on Azure | [公式] |
-| 認定資格 | Microsoft Certified: Azure AI Cloud Developer Associate | [公式] |
-| レベル / 役割 | Intermediate / Developer（分野: Application development、Artificial intelligence） | [公式] |
+| 試験名 | Developing AI Cloud Solutions on Azure（日本語版の表記: **Azureでの AI クラウド ソリューションの開発**） | [公式] |
+| 認定資格 | Microsoft Certified: Azure AI Cloud Developer Associate（日本語版の表記: **Microsoft 認定: Azure AI クラウド 開発者アソシエイト**） | [公式] |
+| レベル / 役割 | Intermediate / Developer（中級 / 開発者。分野: アプリケーションの開発、人工知能） | [公式] |
 | 認定ページの最終更新 | 2026-10-07 | [公式] |
 | 合格点 | 700 以上（1〜1000 のスケールスコア） | [公式] |
 | 試験時間 | ラボなしのアソシエイト試験は **試験時間 100 分・着席時間 120 分**、ラボが含まれうる試験は **120 分・着席 140 分**。Microsoft はラボのある試験を公表しておらず、**申し込み時に試験時間が表示される** | [公式] |
 | 問題数 | 非公開。Microsoft の試験は通常 40〜60 問 | [公式] |
 | 問題形式 | 公式には非公表。Exam Sandbox で体験できる形式: 単一 / 複数選択、ドラッグ＆ドロップ、ビルドリスト（並べ替え）、ホットエリア、アクティブスクリーン、ケーススタディ、ラボ。受験者の報告では**コードや CLI を読む問題が多い** | [公式]＋[複数] |
 | 受験料 | 米国 USD 165。国・地域で異なる | [複数] |
-| 言語 | ローカライズされる試験は英語版の更新から約 8 週間後に更新される。希望の言語がない場合は **+30 分の延長を申請できる**。日本語化は受験者の報告（2026 年 8 月）があるが、申し込み画面で確認 | [公式]＋[要確認] |
+| 言語 | ローカライズされる試験は英語版の更新から約 8 週間後に更新される。希望の言語がない場合は **+30 分の延長を申請できる**。**日本語版のスタディガイドと認定ページは公開済み**（2026-10-07 版の出題範囲・配点 25–30% まで反映）。日本語での受験は受験者の報告（2026 年 8 月に日本語化）があるが、提供言語の一覧は公式ページの動的部分にあり未確認。申し込み画面で確認 | [公式]＋[要確認] |
 | **公式模擬試験（Practice Assessment）** | **あり**。AI Skills Navigator で提供（<http://aka.ms/AI200-PA>）。本番により近い新しい形式 | [公式] |
 | 試験対策動画 | Exam Readiness Zone（<https://aka.ms/AI200-ExamPrep>） | [公式] |
 | 公式コース | **AI-200T00: Develop AI cloud solutions on Microsoft Azure**（講師主導）。AZ-204T00 は 2026-05-29 に廃止され、後継が AI-200T00 | [公式] |
@@ -128,8 +128,8 @@ AI アプリ開発を一通りカバーしたい場合は「AI-200（基盤）�
 
 ## 8. 申し込み前のチェック
 
-- [ ] [AI-200 公式スタディガイド](https://learn.microsoft.com/credentials/certifications/resources/study-guides/ai-200) の「Skills measured」の日付が 2026-10-07 以降か（改訂されていれば変更履歴を確認）
-- [ ] [認定ページ](https://learn.microsoft.com/credentials/certifications/azure-ai-cloud-developer-associate/) から申し込み、表示される試験時間・言語・価格（日本円）を確認
+- [ ] AI-200 公式スタディガイド（[英語版](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-200) / [日本語版](https://learn.microsoft.com/ja-jp/credentials/certifications/resources/study-guides/ai-200)）の「Skills measured」の日付が 2026-10-07 以降か（改訂されていれば変更履歴を確認。日本語版は英語版より更新が遅れることがあるので、日付は英語版で確認）
+- [ ] 認定ページ（[英語版](https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-cloud-developer-associate/) / [日本語版](https://learn.microsoft.com/ja-jp/credentials/certifications/azure-ai-cloud-developer-associate/)）から申し込み、表示される試験時間・言語・価格（日本円）を確認
 - [ ] [Practice Assessment](http://aka.ms/AI200-PA) を受け、80% 以上を安定して取れるまで繰り返す
 - [ ] [Exam Sandbox](https://aka.ms/examdemo) で UI（見直しマーク、休憩、Learn の参照）を確認
 - [ ] 学割・Microsoft Learn のチャレンジ・イベントの割引バウチャーがないか確認

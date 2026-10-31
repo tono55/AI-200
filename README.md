@@ -8,7 +8,8 @@ Microsoft の新しいアソシエイト試験 **AI-200: Developing AI Cloud Sol
 AZ-204 と重なる範囲は旧試験の知識も引用しています。
 
 > 情報は **2026-10-31 時点** の調査です。公式の出題範囲は **2026-10-07 版** の Skills measured を元にしています（公式スタディガイドを Microsoft Learn から直接取得して確認済み）。
-> 受験前に必ず [公式スタディガイド](https://learn.microsoft.com/credentials/certifications/resources/study-guides/ai-200) で最新版を確認してください。
+> 受験前に必ず公式スタディガイド（[英語版](https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-200) / [日本語版](https://learn.microsoft.com/ja-jp/credentials/certifications/resources/study-guides/ai-200)）で最新版を確認してください。
+> 認定ページ: [英語版](https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-cloud-developer-associate/) / [日本語版](https://learn.microsoft.com/ja-jp/credentials/certifications/azure-ai-cloud-developer-associate/)
 > 情報の出典と確度は [docs/sources.md](docs/sources.md) にまとめています。
 
 ---
@@ -17,8 +18,8 @@ AZ-204 と重なる範囲は旧試験の知識も引用しています。
 
 | 項目 | 内容 |
 |---|---|
-| 試験コード / 名称 | AI-200: Developing AI Cloud Solutions on Azure |
-| 認定資格 | Microsoft Certified: Azure AI Cloud Developer Associate |
+| 試験コード / 名称 | AI-200: Developing AI Cloud Solutions on Azure（日本語: Azureでの AI クラウド ソリューションの開発） |
+| 認定資格 | Microsoft Certified: Azure AI Cloud Developer Associate（日本語: Microsoft 認定: Azure AI クラウド 開発者アソシエイト） |
 | レベル | Associate（中級） |
 | 前身 | AZ-204（2026-07-31 廃止） |
 | 試験時間 | **100 分**（着席時間 120 分）。ラボが含まれる回は 120 分（着席 140 分）。正確な時間は申し込み時に表示 |
@@ -52,7 +53,7 @@ AZ-204 と重なる範囲は旧試験の知識も引用しています。
 README.md                         ← いまここ
 docs/
 ├── 00-exam-overview.md           試験の基本情報・形式・日程・関連試験
-├── 01-skills-outline.md          公式出題範囲（27 項目、原文＋和訳）とラーニングパスの対応表
+├── 01-skills-outline.md          公式出題範囲（27 項目、英語原文＋公式日本語訳）、日本語用語の対応表、ラーニングパスの対応表
 ├── 02-az204-to-ai200.md          旧試験 AZ-204 との差分（継続・削除・新規）
 ├── 03-study-plan.md              8 週間の学習計画・学習サイクル・直前チェック
 ├── domains/                      分野別の学習ノート（すべて同じテンプレート）
