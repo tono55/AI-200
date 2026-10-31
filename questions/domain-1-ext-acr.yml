@@ -1,0 +1,464 @@
+# 分野 1 追加問題: ACR（1.1）と ACR Tasks（1.2）
+
+# ---------- 1.1 ----------
+- id: c-acr-georep-latency
+  objective: "1.1"
+  type: single
+  difficulty: 2
+  tags: [acr, geo-replication]
+  question: |
+    Japan East と West Europe の 2 つの AKS クラスターに、同じイメージ `contoso.azurecr.io/api:1.8` をデプロイしています。レジストリは Japan East にある Standard SKU の 1 つだけで、West Europe ではイメージのプルが遅く、スケール アウトに時間がかかります。
+    マニフェストのイメージ参照（ログイン サーバー名）は変えずに、両リージョンで近くからプルさせたいと考えています。最も適切な方法はどれですか。
+  options:
+    - "West Europe に別の Standard レジストリを作り、CI から両方にプッシュする"
+    - "レジストリを Premium にアップグレードし、West Europe に geo レプリケーションを追加する"
+    - "West Europe の AKS に Azure Files をマウントし、イメージを保存する"
+    - "レジストリの管理者ユーザーを有効にして、認証の往復を減らす"
+  answer: B
+  explanation: |
+    **geo レプリケーション（Premium）**は 1 つのレジストリ（同じログイン サーバー名）を複数リージョンに複製し、クライアントは最も近いレプリカからプルします。マニフェストを変える必要がありません。
+    別レジストリを作るとログイン サーバー名が変わるため、リージョンごとにマニフェストを分ける必要があります。管理者ユーザーはプルの速度とは無関係です。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-geo-replication
+
+- id: c-acr-digest-pinning
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, digest, tag]
+  question: |
+    Deployment のイメージを `contoso.azurecr.io/api@sha256:4a1f...c9` のようにダイジェストで指定しています。その後、CI が同じリポジトリに新しいイメージをビルドし、タグ `latest` と `1.9` を付けてプッシュしました。
+    この Deployment の Pod がノード障害で別のノードに再作成されたとき、どのイメージで起動しますか。
+  options:
+    - "`latest` が指す新しいイメージ"
+    - "`1.9` が指す新しいイメージ"
+    - "ダイジェスト `sha256:4a1f...c9` の元のイメージ（そのマニフェストが削除されていない限り）"
+    - "ダイジェスト指定は再作成時には無視され、エラーになる"
+  answer: C
+  explanation: |
+    ダイジェストはマニフェストの内容から計算される**不変の識別子**です。新しいイメージをプッシュしてタグが付け替わっても、ダイジェスト指定は元のイメージを指し続けます。
+    ただし、そのマニフェストを削除（purge など）すると、プルに失敗するようになります。本番でダイジェストを参照するなら、保持ポリシーやロックで削除されないようにします。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-concepts
+    - https://learn.microsoft.com/azure/container-registry/container-registry-image-tag-version
+
+- id: c-acr-untag-storage
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, storage, purge]
+  question: |
+    古いビルドのタグを `az acr repository untag` で外していますが、レジストリのストレージ使用量が減りません。7 日より前の、タグの付いていないマニフェストを定期的に削除したいと考えています。最も適切な方法はどれですか。
+  options:
+    - "`az acr repository untag` をもう一度実行する"
+    - "ACR Tasks のタイマー トリガー付きタスクで `acr purge --filter 'api:.*' --untagged --ago 7d` を実行する"
+    - "レジストリの SKU を Basic に下げる"
+    - "管理者ユーザーを無効にする"
+  answer: B
+  explanation: |
+    `untag` はタグを外すだけで、**マニフェストとレイヤーは残る**ため、ストレージは減りません（ダイジェスト指定でまだプルできます）。
+    `acr purge` を ACR Tasks（`az acr run --cmd` や `--schedule` 付きのタスク）で実行すると、条件に合うタグや `--untagged` のマニフェストを定期的に削除できます。ロックされたイメージは削除されません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-auto-purge
+    - https://learn.microsoft.com/azure/container-registry/container-registry-delete
+
+- id: c-acr-lock-attributes
+  objective: "1.1"
+  type: yesno
+  difficulty: 2
+  tags: [acr, lock]
+  question: |
+    `az acr repository update --name contoso --image api:2.0 --write-enabled false` を実行しました。この結果について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "同じタグ `api:2.0` で別のイメージをプッシュして上書きすることはできなくなる。"
+      answer: true
+    - text: "`api:2.0` を削除することもできなくなる。"
+      answer: true
+    - text: "`api:2.0` をプルすることもできなくなる。"
+      answer: false
+    - text: "削除だけを禁止して更新は許可したい場合は、`--delete-enabled false --write-enabled true` を指定する。"
+      answer: true
+  explanation: |
+    `write-enabled false` でイメージをロックすると、上書きも削除もできなくなりますが、プル（読み取り）はできます。
+    削除だけを防ぐなら `delete-enabled false`、一覧に表示させないなら `list-enabled false`、プルも止めるなら `read-enabled false` です。ロックしたイメージは `acr purge` の対象にもなりません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-image-lock
+
+- id: c-acr-scoped-token
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, token, authorization]
+  question: |
+    外部の委託先が、レジストリ `contoso` のうち `partner/` で始まるリポジトリのイメージだけをプルできるようにしたいと考えています。委託先は Microsoft Entra ID のテナントに参加していません。最も適切な方法はどれですか。
+  options:
+    - "管理者ユーザーを有効にし、そのパスワードを委託先に渡す"
+    - "`partner/*` リポジトリに `content/read` を許可するスコープ マップを作り、それに紐づくトークンを発行する"
+    - "委託先にレジストリ全体の AcrPull ロールを割り当てる"
+    - "レジストリを匿名プル可能にする"
+  answer: B
+  explanation: |
+    **リポジトリ スコープのトークン**は、スコープ マップで指定したリポジトリと操作（`content/read` など）だけを許可する資格情報で、Entra ID を使えない相手にも渡せます。有効期限の設定や無効化もできます。
+    管理者ユーザーや AcrPull ロール（レジストリ全体）は権限が広すぎ、匿名プルは誰でもプルできてしまいます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-repository-scoped-permissions
+
+- id: c-acr-import-cross
+  objective: "1.1"
+  type: single
+  difficulty: 2
+  tags: [acr, import]
+  question: |
+    開発用レジストリ `devreg` で検証済みのイメージ `api:3.1` を、本番用レジストリ `prodreg`（同じテナント、別サブスクリプション）にコピーしたいと考えています。
+    CI エージェントには Docker がなく、イメージをローカルにプルせずに済ませたいです。最も適切なコマンドはどれですか。
+  options:
+    - "`docker pull` と `docker push` を CI エージェントで実行する"
+    - "`az acr import --name prodreg --source devreg.azurecr.io/api:3.1 --image api:3.1`（必要に応じて `--registry` で元のレジストリのリソース ID を指定）"
+    - "`az acr build -r prodreg -t api:3.1 .` でソースから再ビルドする"
+    - "`az acr repository update --write-enabled true` を実行する"
+  answer: B
+  explanation: |
+    `az acr import` はレジストリ間でイメージを**サーバー側でコピー**します。Docker は不要で、同じテナントなら元のレジストリのリソース ID（`--registry`）で認証できます。
+    再ビルドすると検証済みのイメージとは別物（ダイジェストが変わる）になり、「検証したものを昇格する」という目的に反します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-import-images
+
+- id: c-acr-arm64-build
+  objective: "1.1"
+  type: single
+  difficulty: 2
+  tags: [acr, multi-arch]
+  question: |
+    AKS に Arm64 のノード プールを追加しました。既存の CI は `az acr build -r contoso -t api:{{.Run.ID}} .` で amd64 のイメージだけを作っており、Arm64 ノードでは `exec format error` で起動しません。
+    ACR Tasks で Arm64 用のイメージをビルドするには、どうすればよいですか。
+  options:
+    - "`az acr build` に `--platform linux/arm64` を指定してビルドする（必要に応じて amd64 と合わせたマルチアーキテクチャのマニフェストを作る）"
+    - "Arm64 ノードにだけ `imagePullPolicy: Always` を設定する"
+    - "レジストリを Premium にする"
+    - "Dockerfile の `EXPOSE` を変更する"
+  answer: A
+  explanation: |
+    `exec format error` は CPU アーキテクチャの不一致です。ACR Tasks では `--platform` でビルド対象のプラットフォームを指定できます。
+    1 つのタグで両方のノードから使いたい場合は、各アーキテクチャのイメージをまとめたマニフェスト リスト（マルチアーキテクチャ イメージ）を作ります。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+    - https://learn.microsoft.com/azure/container-registry/push-multi-architecture-images
+
+- id: c-acr-tag-strategy-match
+  objective: "1.1"
+  type: match
+  difficulty: 2
+  tags: [acr, tag]
+  question: |
+    イメージを使う側の目的と、参照すべきタグの種類を対応付けてください。
+  pairs:
+    - left: "社内のベース イメージを使うアプリ チーム。OS のセキュリティ パッチは自動で取り込みたい"
+      right: "安定タグ（例: base/python:3.12）"
+    - left: "本番環境へのデプロイ。ロールバック時に確実に同じイメージへ戻したい"
+      right: "一意タグ（ビルド ID / コミット SHA）またはダイジェスト"
+    - left: "開発者が手元で最新の開発版をすぐ試したい"
+      right: "latest などの可変タグ"
+  explanation: |
+    **安定タグ**は保守者が更新し続ける前提のタグで、ベース イメージのように「パッチは自動で受け取りたい」用途に向きます。
+    **一意タグ**やダイジェストは中身が変わらないため、本番デプロイやロールバックに向きます。`latest` は開発用途に限ります。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-image-tag-version
+
+- id: c-acr-network-features
+  objective: "1.1"
+  type: yesno
+  difficulty: 2
+  tags: [acr, network, sku]
+  question: |
+    ACR のネットワーク制限について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "プライベート エンドポイントを使うには Premium SKU が必要である。"
+      answer: true
+    - text: "パブリック IP アドレスの範囲でアクセスを制限するネットワーク ルールは、Basic SKU でも構成できる。"
+      answer: false
+    - text: "SKU を Premium から Standard に下げる前に、Premium 専用機能（geo レプリケーションなど）の構成を解除する必要がある場合がある。"
+      answer: true
+  explanation: |
+    プライベート エンドポイント（Private Link）とパブリック IP のネットワーク ルールは Premium の機能です。
+    SKU の変更自体はダウンタイムなしで行えますが、Premium から下げる場合は Premium 専用の機能を先に解除する必要がある場合があります。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-skus
+    - https://learn.microsoft.com/azure/container-registry/container-registry-access-selected-networks
+
+- id: c-acr-throttle-scaleout
+  objective: "1.1"
+  type: single
+  difficulty: 3
+  tags: [acr, throttling, scale]
+  question: |
+    イベント時に Container Apps と AKS が一斉に数百レプリカへスケール アウトすると、Standard SKU のレジストリからのプルが `429 Too Many Requests` で失敗し、起動が遅れます。イメージの数やサイズは小さく、ストレージは十分です。
+    最も効果的な対策はどれですか。
+  options:
+    - "レジストリを Premium にアップグレードする（読み取りの処理上限が高い。必要ならリージョンごとに geo レプリケーションで負荷を分散する）"
+    - "イメージ タグを `latest` に統一する"
+    - "管理者ユーザーで認証するように変更する"
+    - "Basic SKU に変更してコストを下げる"
+  answer: A
+  explanation: |
+    ACR は SKU ごとに読み取り（プル）操作の上限があり、Premium は Basic / Standard より高い上限を持ちます。geo レプリケーションでレプリカに読み取りを分散することもできます。
+    認証方式やタグ名はスロットリングの上限とは関係ありません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-skus
+
+- id: c-acr-base-image-import
+  objective: "1.1"
+  type: single
+  difficulty: 2
+  tags: [acr, import, supply-chain]
+  question: |
+    CI のビルドがときどき Docker Hub のレート制限で失敗します。また、セキュリティ チームは「社外のレジストリに直接依存しない」ことを求めています。Dockerfile の `FROM python:3.12-slim` をどう変えるのが最も適切ですか。
+  options:
+    - "`az acr import` で `docker.io/library/python:3.12-slim` を自社の ACR に取り込み、`FROM contoso.azurecr.io/base/python:3.12-slim` にする"
+    - "CI のビルドに再試行を 10 回追加する"
+    - "`FROM python:latest` に変える"
+    - "ACR の管理者ユーザーを有効にする"
+  answer: A
+  explanation: |
+    外部のベース イメージを自社の ACR に取り込み（またはキャッシュし）、そこから参照すれば、外部レジストリのレート制限や障害の影響を受けず、使うイメージを管理・スキャンできます。
+    取り込んだベース イメージを ACR Tasks のベース イメージ更新トリガーと組み合わせると、パッチの自動適用も実現できます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/buffer-gate-public-content
+
+# ---------- 1.2 ----------
+- id: c-acrtask-base-trigger-chain
+  objective: "1.2"
+  type: single
+  difficulty: 3
+  tags: [acr-tasks, base-image]
+  question: |
+    社内のベース イメージ `contoso.azurecr.io/base/python:3.12` は、別の ACR タスクで毎週パッチを当てて再ビルドされています。アプリのイメージ（`FROM contoso.azurecr.io/base/python:3.12`）も、ベース イメージが更新されたら自動で再ビルドしたいと考えています。
+    アプリ側の構成として最も適切なものはどれですか。
+  options:
+    - "アプリのイメージを `az acr build` で毎時ビルドする cron ジョブを外部に用意する"
+    - "アプリの Git リポジトリをコンテキストにした ACR タスクを作成する（ベース イメージ更新トリガーは既定で有効。ACR がビルド時にベース イメージへの依存を記録する）"
+    - "ベース イメージのタグを `latest` にする"
+    - "アプリのイメージをロックする"
+  answer: B
+  explanation: |
+    ACR タスクはビルド時に Dockerfile のベース イメージへの依存関係を検出・記録し、そのベース イメージが（同じレジストリなどで）更新されると、依存するアプリ イメージを自動で再ビルドします。ベース イメージ更新トリガーは既定で有効です。
+    外部 cron は変更がなくても無駄にビルドし、更新から反映までの遅れも大きくなります。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-base-images
+
+- id: c-acrtask-no-push
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, ci]
+  question: |
+    プル リクエストのたびに「Dockerfile がビルドできるか」だけを ACR 上で確認したいと考えています。検証用のイメージはレジストリに残したくありません。どのコマンドを使いますか。
+  options:
+    - "`az acr build -r contoso -t api:pr-123 --no-push .`"
+    - "`az acr import -n contoso --source ./Dockerfile`"
+    - "`az acr run -r contoso --cmd 'docker build .' /dev/null`"
+    - "`az acr repository delete -n contoso --image api:pr-123`"
+  answer: A
+  explanation: |
+    `az acr build` は既定でビルド後にプッシュしますが、`--no-push` を付けるとビルドだけを行い、レジストリには保存しません。PR の検証に適しています。
+  refs:
+    - https://learn.microsoft.com/cli/azure/acr#az-acr-build
+
+- id: c-acrtask-variables
+  objective: "1.2"
+  type: dropdown
+  difficulty: 2
+  tags: [acr-tasks, variables]
+  question: |
+    同じ「実行 ID をタグにしてビルドする」処理を、CLI のクイック タスクとマルチステップ タスクの YAML でそれぞれ書きます。空欄を埋めてください。
+  language: text
+  template: |
+    # CLI（クイック タスク）
+    az acr build -r contoso -t api:{{1}} .
+
+    # acr-task.yaml（マルチステップ タスク）
+    steps:
+      - build: -t {{2}}/api:{{3}} .
+      - push: ["{{2}}/api:{{3}}"]
+  blanks:
+    "1": {options: ["{{.Run.ID}}", "$ID", "${BUILD_ID}"], answer: "{{.Run.ID}}"}
+    "2": {options: ["$Registry", "{{.Run.Registry}}", "$LoginServer"], answer: "$Registry"}
+    "3": {options: ["$ID", "{{.Run.ID}}", "$RunId"], answer: "$ID"}
+  explanation: |
+    CLI の `az acr build` / タスク定義の `--image` では Go テンプレート形式の `{{.Run.ID}}`、`{{.Run.Registry}}` を使います。
+    マルチステップ タスクの YAML では `$ID`、`$Registry` という形式の既定の変数を使います。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-reference-yaml
+
+- id: c-acrtask-parallel-when
+  objective: "1.2"
+  type: single
+  difficulty: 3
+  tags: [acr-tasks, yaml, multi-step]
+  question: |
+    マルチステップ タスクで、互いに依存しない `web` と `worker` の 2 つのイメージを**並列に**ビルドし、両方が終わってからテストを実行したいと考えています。YAML の書き方として正しいものはどれですか。
+  options:
+    - "各ステップに `id` を付け、`web` と `worker` のビルドに `when: [\"-\"]`、テストに `when: [\"web\", \"worker\"]` を指定する"
+    - "ステップを書いた順に必ず並列実行されるので、何も指定しなくてよい"
+    - "`parallel: true` をタスク全体に指定する"
+    - "2 つの別々のタスクにしなければ並列実行はできない"
+  answer: A
+  explanation: |
+    マルチステップ タスクのステップは既定では**順番に**実行されます。`when: ["-"]` を付けたステップは前のステップを待たずにすぐ開始され、`when: ["<id>", ...]` で指定したステップの完了を待つことができます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-reference-yaml
+
+- id: c-acrtask-timer-utc
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, timer]
+  question: |
+    ACR タスクを毎日 **日本時間 3:00** に実行したいと考えています（日本時間は UTC+9）。`--schedule` に指定する cron 式として正しいものはどれですか。
+  options:
+    - "`0 3 * * *`"
+    - "`0 18 * * *`"
+    - "`0 12 * * *`"
+    - "`0 0 3 * * *`"
+  answer: B
+  explanation: |
+    ACR Tasks のタイマー トリガーの cron 式は **UTC** で解釈されます。日本時間 3:00 は前日の UTC 18:00 なので `0 18 * * *` です。
+    ACR Tasks の cron は 5 フィールド（分 時 日 月 曜日）で、秒を含む 6 フィールドの Azure Functions の NCRONTAB とは異なります。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-scheduled
+
+- id: c-acrtask-context-subfolder
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, context, git]
+  question: |
+    モノレポの `release` ブランチにある `src/api` フォルダーをビルド コンテキストにして、コミットのたびにビルドする ACR タスクを作ります。`--context` に指定する値として正しいものはどれですか。
+  options:
+    - "`https://github.com/contoso/mono.git#release:src/api`"
+    - "`https://github.com/contoso/mono.git/src/api@release`"
+    - "`https://github.com/contoso/mono.git --branch release --folder src/api`"
+    - "`release:src/api@https://github.com/contoso/mono.git`"
+  answer: A
+  explanation: |
+    Git リポジトリのコンテキストは `<リポジトリ URL>#<ブランチまたはコミット>:<フォルダー>` の形式で指定します。プライベート リポジトリやコミット トリガーには、Webhook を設定するための PAT（`--git-access-token`）が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+
+- id: c-acrtask-run-cmd
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, run]
+  question: |
+    レジストリにあるマイグレーション用イメージ `tools/dbmigrate:5` を、一度だけ Azure 上で実行したいと考えています。手元に Docker 環境はなく、ビルドは不要です。どのコマンドが適切ですか。
+  options:
+    - "`az acr build -r contoso -t tools/dbmigrate:5 .`"
+    - "`az acr run -r contoso --cmd '$Registry/tools/dbmigrate:5' /dev/null`"
+    - "`az acr import -n contoso --source tools/dbmigrate:5`"
+    - "`az acr task logs -r contoso`"
+  answer: B
+  explanation: |
+    `az acr run --cmd` は、レジストリのイメージをコンテナーとして ACR Tasks 上で実行します。ビルドのコンテキストが不要なので `/dev/null` を渡します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-multi-step
+
+- id: c-acrtask-secret-build-arg
+  objective: "1.2"
+  type: single
+  difficulty: 3
+  tags: [acr-tasks, secrets]
+  question: |
+    ビルド中に社内パッケージ フィードのトークンが必要です。`az acr build --build-arg FEED_TOKEN=...` で渡したところ、セキュリティ レビューで「トークンがログやイメージの履歴に残るおそれがある」と指摘されました。ACR Tasks の機能で改善するにはどうしますか。
+  options:
+    - "`--secret-build-arg` で渡す（またはタスクのマネージド ID で Key Vault からシークレットを取得する）"
+    - "トークンを Dockerfile に直接書く"
+    - "トークンをイメージの `ENV` に設定する"
+    - "ビルド ログを無効にする方法はないので、そのまま運用する"
+  answer: A
+  explanation: |
+    `--secret-build-arg` で渡した値はログに表示されません。さらに安全にするには、タスクに**マネージド ID**を割り当て、マルチステップ タスクの `secrets` で Key Vault から値を取得します。
+    いずれの場合も、Dockerfile で値を `ENV` に入れたり、最終イメージのレイヤーに残したりしない（マルチステージ ビルドなど）ことが重要です。
+  refs:
+    - https://learn.microsoft.com/cli/azure/acr#az-acr-build
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-authentication-key-vault
+
+- id: c-acrtask-cross-registry-identity
+  objective: "1.2"
+  type: single
+  difficulty: 3
+  tags: [acr-tasks, managed-identity]
+  question: |
+    `devreg` の ACR タスクで、ビルドしたイメージを別のレジストリ `prodreg` にもプッシュしたいと考えています。パスワードは使いたくありません。最も適切な構成はどれですか。
+  options:
+    - "タスクにマネージド ID を割り当て（`--assign-identity`）、その ID に `prodreg` の AcrPush を付与し、`az acr task credential add` で `prodreg` の資格情報としてその ID を登録する"
+    - "`prodreg` の管理者ユーザーのパスワードをタスクの YAML に書く"
+    - "`prodreg` を匿名プッシュ可能にする"
+    - "ACR Tasks から他のレジストリへはプッシュできないので、手動でコピーする"
+  answer: A
+  explanation: |
+    ACR タスクはシステム割り当て / ユーザー割り当てのマネージド ID を持てます。他のレジストリへのアクセスには、その ID に AcrPush などのロールを付与し、タスクの資格情報として登録します。シークレットを YAML に書く必要がありません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-cross-registry-authentication
+
+- id: c-acrtask-facts
+  objective: "1.2"
+  type: yesno
+  difficulty: 2
+  tags: [acr-tasks]
+  question: |
+    ACR Tasks について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`az acr build` は、ローカルのソース フォルダーを Azure にアップロードしてビルドする。このとき `.dockerignore` に書いたファイルは除外される。"
+      answer: true
+    - text: "クイック タスクを使うには、手元のマシンで Docker デーモンが動いている必要がある。"
+      answer: false
+    - text: "タスクの実行履歴とログは、後から `az acr task list-runs` と `az acr task logs --run-id <ID>` で確認できる。"
+      answer: true
+    - text: "マルチステップ タスクでは、ビルドしたイメージをコンテナーとして実行し、テストが失敗したらプッシュしないといった制御ができる。"
+      answer: true
+  explanation: |
+    クイック タスクはソースをアップロードして Azure 上でビルドするため、手元に Docker は不要です（`.dockerignore` は尊重されます）。
+    マルチステップ タスクでは `build` → `cmd`（テスト）→ `push` のように並べ、途中のステップが失敗すると後続は実行されません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-multi-step
+
+- id: c-acrtask-patch-flow
+  objective: "1.2"
+  type: order
+  difficulty: 3
+  tags: [acr-tasks, base-image, patching]
+  question: |
+    「OS のセキュリティ パッチが公開されたら、アプリのイメージまで自動で更新し、Container Apps に新しいリビジョンが作られる」仕組みを作ります。イベントが起きる順に並べてください。
+  items:
+    - "ベース イメージ用のタスクがパッチ済みのベース イメージをビルドし、ACR にプッシュする"
+    - "ACR がアプリ イメージのタスクの依存先（ベース イメージ）の更新を検知し、アプリのタスクを起動する"
+    - "アプリのタスクが新しいアプリ イメージをビルドし、一意のタグでプッシュする"
+    - "CD（Webhook や Event Grid のイベント）が新しいタグで Container Apps を更新し、新しいリビジョンが作られる"
+  distractors:
+    - "Container Apps が ACR をポーリングし、同じタグの新しいイメージを自動でプルして既存のリビジョンを書き換える"
+  explanation: |
+    ACR Tasks のベース イメージ更新トリガーで、ベース → アプリの再ビルドまでは自動化できます。デプロイは、ACR の Webhook や Event Grid のイベント（`ImagePushed`）を CD に連携して、新しいタグを指定して更新します。
+    Container Apps は既存のリビジョンのイメージを自動で差し替えません（イメージの変更は新しいリビジョンになる）。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-base-images
+    - https://learn.microsoft.com/azure/container-registry/container-registry-event-grid-quickstart
+
+- id: c-acrtask-pat-trigger
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, git, trigger]
+  question: |
+    GitHub のプライベート リポジトリをコンテキストにした ACR タスクを作成し、コミット時に自動でビルドさせたいと考えています。タスク作成時に必要なものはどれですか。
+  options:
+    - "Webhook の作成とリポジトリの読み取りに使う GitHub の個人用アクセス トークン（`--git-access-token`）"
+    - "ACR の管理者ユーザーのパスワード"
+    - "GitHub Actions のワークフロー ファイル"
+    - "Event Grid のシステム トピック"
+  answer: A
+  explanation: |
+    ソース コードのトリガーでは、ACR がリポジトリに Webhook を設定し、コードを取得する必要があるため、適切なスコープを持つ PAT を指定します。
+    （PAT は期限切れに注意。期限が切れるとトリガーや取得が失敗します。）
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tutorial-build-task
