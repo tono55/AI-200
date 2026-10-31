@@ -1,0 +1,476 @@
+# 分野 2 追加問題（2 周目）: Cosmos DB for NoSQL（2.1〜2.4）
+
+# ---------- 2.1 ----------
+- id: d-cosmos-shared-vs-dedicated
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, throughput]
+  question: |
+    1 つのデータベースに共有スループット（10,000 RU/s）を設定し、その中に 8 つのコンテナーを置いています。夜間のバッチが `audit` コンテナーに大量に書き込むと、日中から動いている `chat-sessions` コンテナーの応答が遅くなり、429 も出ます。最も適切な対処はどれですか。
+  options:
+    - "`chat-sessions` のような重要なコンテナーに専用（コンテナー単位）のスループットを割り当て、共有スループットの影響を受けないようにする"
+    - "整合性レベルを Eventual にする"
+    - "パーティション キーを `/id` に変更する"
+    - "`chat-sessions` のインデックス作成ポリシーを既定に戻す"
+  answer: A
+  explanation: |
+    共有スループットはデータベース内のコンテナーで RU を分け合うため、1 つのコンテナーの負荷が他に影響します（ノイジー ネイバー）。性能を保証したいコンテナーには専用のスループットを割り当てます。なお、ベクトル検索は共有スループットのアカウントでは使えません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/set-throughput
+
+- id: d-cosmos-pk-chat
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, partition-key, design]
+  question: |
+    チャットの会話履歴を保存します。主なアクセスは「ある会話（sessionId）のメッセージを時系列で取得する」で、1 つの会話は最大でも数百件です。利用者は数百万人で、1 人が多数の会話を持ちます。パーティション キーとして最も適切なものはどれですか。
+  options:
+    - "`/sessionId`"
+    - "`/messageType`（user / assistant の 2 種類）"
+    - "`/createdDate`（日付）"
+    - "`/region`（数種類）"
+  answer: A
+  explanation: |
+    主要なクエリのフィルターに含まれ、値の種類が多く、1 つの値のデータ量が小さい `/sessionId` が適しています。種類の少ない値や日付は、特定のパーティションに書き込みが集中します（ホット パーティション）。利用者単位の一覧が必要なら、階層型パーティション キー（`/userId` → `/sessionId`）も検討できます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/partitioning-overview
+
+- id: d-cosmos-read-many
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, sdk, read-many]
+  question: |
+    ベクトル検索ではなく別のシステムで決めた 50 件の文書（それぞれの `id` とパーティション キーが分かっている）を、Cosmos DB から一度に取得したいです。RU と遅延を最小にする方法として最も適切なものはどれですか（.NET SDK）。
+  options:
+    - "`ReadManyItemsAsync` で `(id, PartitionKey)` のリストを渡して一括で取得する"
+    - "`SELECT * FROM c WHERE c.id IN (...)` をクロスパーティションで実行する"
+    - "`SELECT * FROM c` で全件取得してアプリで絞り込む"
+    - "1 件ずつ順番にクエリで取得する"
+  answer: A
+  explanation: |
+    ReadMany はポイント読み取りをまとめて効率よく実行する API で、`IN` を使ったクロスパーティション クエリより RU と遅延を抑えられます。
+  refs:
+    - https://learn.microsoft.com/dotnet/api/microsoft.azure.cosmos.container.readmanyitemsasync
+
+- id: d-cosmos-bulk
+  objective: "2.1"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, sdk, bulk]
+  question: |
+    .NET アプリで 200 万件のチャンクを Cosmos DB に初期投入します。1 件ずつ `await CreateItemAsync()` しているため、プロビジョニングした RU を使い切れずに時間がかかっています。最も効果的な改善はどれですか。
+  options:
+    - "`CosmosClientOptions.AllowBulkExecution = true` にして、多数の操作を並行に発行する（SDK がまとめて送信する）"
+    - "整合性レベルを Strong にする"
+    - "1 件ごとに新しい `CosmosClient` を作る"
+    - "インデックス作成ポリシーにすべてのプロパティの複合インデックスを追加する"
+  answer: A
+  explanation: |
+    一括実行（bulk）モードでは、SDK が同じパーティションへの操作をまとめて送信し、スループットを効率よく使えます。逐次の `await` は往復の待ち時間がボトルネックになります。インデックスを増やすと書き込みの RU は増えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/how-to-migrate-from-bulk-executor-library
+
+- id: d-cosmos-diagnostics
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, troubleshooting, latency]
+  question: |
+    一部のポイント読み取りだけが数百ミリ秒かかります。RU は 1 程度で、429 も出ていません。原因（ネットワーク、リージョン、再試行、接続の確立など）を切り分けるために、SDK で最初に確認すべきものはどれですか。
+  options:
+    - "応答の診断情報（.NET の `ItemResponse.Diagnostics` など）で、接続先リージョン・再試行・各段階の所要時間を確認する"
+    - "インデックス作成ポリシー"
+    - "パーティション キーの値の長さ"
+    - "コンテナーの TTL"
+  answer: A
+  explanation: |
+    SDK の診断情報には、どのリージョン・レプリカに接続したか、再試行の有無、ネットワークやシリアル化にかかった時間などが含まれます。遅い要求だけ診断を記録すると、原因を切り分けやすくなります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/troubleshoot-dotnet-sdk-slow-request
+
+# ---------- 2.2 ----------
+- id: d-cosmos-index-transformation
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, indexing]
+  question: |
+    稼働中のコンテナー（5 億アイテム）のインデックス作成ポリシーに、複合インデックスを追加しました。正しい説明はどれですか。
+  options:
+    - "インデックスの変換はオンラインでバックグラウンドに行われ、プロビジョニングされた RU を使う。完了するまで、新しいインデックスを前提とするクエリは期待どおりの性能や結果にならないことがあるため、進捗を確認する"
+    - "変更の瞬間にコンテナーが読み取り専用になる"
+    - "既存のアイテムには新しいインデックスは適用されない"
+    - "インデックス作成ポリシーは作成後に変更できない"
+  answer: A
+  explanation: |
+    インデックス作成ポリシーの変更は、既存データのインデックスを変換するオンライン処理になります。書き込みや読み取りは止まりませんが、余ったスループットを使って進むため、大きなコンテナーでは時間がかかります。進捗は SDK / API で確認できます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/index-policy
+    - https://learn.microsoft.com/azure/cosmos-db/how-to-manage-indexing-policy
+
+- id: d-cosmos-consistency-guarantees
+  objective: "2.2"
+  type: match
+  difficulty: 3
+  tags: [cosmos-db, consistency]
+  question: |
+    整合性レベルと、その保証を対応付けてください。
+  pairs:
+    - left: "Strong"
+      right: "常に最新のコミット済みの値を読む（線形化可能）"
+    - left: "Bounded staleness"
+      right: "遅れは最大 K 個のバージョン、または T 秒以内"
+    - left: "Session"
+      right: "同じセッション内では自分の書き込みを必ず読める"
+    - left: "Consistent prefix"
+      right: "書き込みの順序が入れ替わって見えることはない"
+  distractors:
+    - "書き込みは常に 2 回行われる"
+  explanation: |
+    強い順に Strong → Bounded staleness → Session → Consistent prefix → Eventual です。強いほど鮮度は上がりますが、遅延・可用性・RU（Strong と Bounded staleness は読み取りが約 2 倍）のコストが増えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/consistency-levels
+
+- id: d-cosmos-relax-per-request
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, consistency]
+  question: |
+    アカウントの既定の整合性レベルは Session です。管理画面の「統計」タブだけは、多少古い値でもよいので読み取りの RU とレイテンシを最小にしたいです。最も適切な方法はどれですか。
+  options:
+    - "そのクエリのリクエスト オプションで整合性レベルを Eventual に下げる（リクエスト単位で既定より弱くできる）"
+    - "アカウント全体を Strong にする"
+    - "アカウント全体を Eventual にする"
+    - "そのクエリだけ Strong にする"
+  answer: A
+  explanation: |
+    整合性レベルはリクエスト単位で既定より**弱める**ことができます。アカウント全体を変えると他の画面にも影響します。リクエスト単位で既定より強くすることはできません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/how-to-manage-consistency
+
+- id: d-cosmos-contains-scan
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, full-text, query]
+  question: |
+    `SELECT * FROM c WHERE CONTAINS(c.content, 'リセット')` で本文の部分一致検索をしていますが、データが増えるにつれて RU が急増しています。キーワード検索を効率化する Cosmos DB の機能として最も適切なものはどれですか。
+  options:
+    - "フルテキスト ポリシーとフルテキスト インデックスを定義し、`FullTextContains` / `FullTextScore` を使う"
+    - "`content` に複合インデックスを作る"
+    - "整合性レベルを Eventual にする"
+    - "`content` をパーティション キーにする"
+  answer: A
+  explanation: |
+    `CONTAINS` は部分文字列の照合で、範囲インデックスを効率よく使えず多くのアイテムを評価します。フルテキスト検索はトークン化されたインデックスを使い、BM25 によるスコアリング（`FullTextScore`）やハイブリッド検索にも使えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/full-text-search
+
+- id: d-cosmos-autoscale-range
+  objective: "2.2"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, autoscale]
+  question: |
+    コンテナーに自動スケールの最大スループット 20,000 RU/s を設定しました。負荷がほとんどない時間帯のスループット（課金の下限）はいくつになりますか。
+  options:
+    - "2,000 RU/s（最大の 10%）"
+    - "0 RU/s"
+    - "400 RU/s"
+    - "20,000 RU/s"
+  answer: A
+  explanation: |
+    自動スケールは、最大 RU/s の **10%〜100%** の範囲で、その時間の最大使用量に応じて自動で調整されます。負荷がなくても最大の 10% が下限です。完全に使った分だけにしたいならサーバーレスを検討します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/provision-throughput-autoscale
+
+- id: d-cosmos-physical-partition
+  objective: "2.2"
+  type: yesno
+  difficulty: 3
+  tags: [cosmos-db, partitions]
+  question: |
+    Cosmos DB のパーティションについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "1 つの物理パーティションが提供できるスループットには上限（10,000 RU/s）がある。"
+      answer: true
+    - text: "1 つの論理パーティションのデータは、複数の物理パーティションに分割される。"
+      answer: false
+    - text: "プロビジョニングしたスループットは、物理パーティションに均等に分配される。"
+      answer: true
+    - text: "クエリでパーティション キーを指定すると、1 つのパーティションだけで処理されるため効率がよい。"
+      answer: true
+  explanation: |
+    論理パーティション（同じキー値のアイテム）は 1 つの物理パーティションに収まります。そのため、1 つのキー値に負荷が集中すると、その物理パーティションの上限で頭打ちになります（ホット パーティション）。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/partitioning-overview
+
+- id: d-cosmos-query-metrics
+  objective: "2.2"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, query, diagnostics]
+  question: |
+    あるクエリの RU が想定の 10 倍かかっています。クエリが**どのインデックスを使ったか、どんなインデックスを追加すべきか**を確認するには、SDK で何を有効にしますか。
+  options:
+    - "インデックス メトリック（`PopulateIndexMetrics` など）を有効にして結果を確認する"
+    - "整合性レベルを Strong にする"
+    - "TTL を有効にする"
+    - "変更フィードを有効にする"
+  answer: A
+  explanation: |
+    インデックス メトリックは、クエリで使われたインデックスと、追加すると効果がありそうな（推奨）インデックスを示します。クエリ メトリック（取得したドキュメント数と返したドキュメント数の比率など）も合わせて確認します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/index-metrics
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/query-metrics
+
+# ---------- 2.3 ----------
+- id: d-cosmos-weighted-rrf
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, hybrid-search]
+  question: |
+    ハイブリッド検索（ベクトル + フルテキスト）を評価したところ、この業務では意味の近さの方がキーワード一致より重要だと分かりました。ベクトル検索の順位を 2 倍重視するクエリはどれですか。
+  options:
+    - "`ORDER BY RANK RRF(VectorDistance(c.vector, @q), FullTextScore(c.text, @kw), [2, 1])`"
+    - "`ORDER BY RANK RRF(FullTextScore(c.text, @kw), VectorDistance(c.vector, @q), [2, 1])`"
+    - "`ORDER BY VectorDistance(c.vector, @q) * 2`"
+    - "`ORDER BY RANK RRF(VectorDistance(c.vector, @q)) LIMIT 2`"
+  answer: A
+  explanation: |
+    `RRF` の最後の引数に重みの配列を指定でき、各要素はスコア関数の順番に対応します。ベクトル検索を先に書き、`[2, 1]` とすると、ベクトルの順位が 2 倍重視されます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/hybrid-search
+
+- id: d-cosmos-multi-vector
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, vector, policy]
+  question: |
+    商品アイテムに「タイトルの埋め込み」と「説明文の埋め込み」の 2 つを持たせ、用途に応じて使い分けたいです。Cosmos DB での設計として正しいものはどれですか。
+  options:
+    - "ベクトル埋め込みポリシーに 2 つのパス（例: `/titleVector`、`/descVector`）を定義し、それぞれにベクトル インデックスを作る。クエリでは使いたいパスを `VectorDistance` に指定する"
+    - "1 つのパスに 2 つのベクトルを配列で入れる"
+    - "2 つの埋め込みを足し合わせて 1 つにする以外に方法はない"
+    - "コンテナーを 2 つ作らなければならない"
+  answer: A
+  explanation: |
+    ベクトル埋め込みポリシーには、パスごとに異なる設定（次元、データ型、距離関数）を複数定義できます。各パスに別のインデックスを作れます（ワイルドカードや配列内のパスは不可）。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-embedding-freshness
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, embeddings, data-quality]
+  question: |
+    チャンクの本文を修正したときに、埋め込みの更新が漏れることがあり、検索結果が古い内容に基づいてしまいます。更新漏れを検出・防止する設計として最も適切なものはどれですか。
+  options:
+    - "アイテムに本文のハッシュと、埋め込みを作ったときのハッシュ・モデル名を持たせ、不一致のアイテムを変更フィードで再埋め込みする"
+    - "埋め込みを毎日すべて作り直す"
+    - "本文を修正できないようにする"
+    - "ベクトル インデックスを flat にする"
+  answer: A
+  explanation: |
+    本文と埋め込みの対応関係をメタデータで追跡すると、更新漏れを確実に検出でき、必要なアイテムだけ再計算できます。モデル名を持たせておくと、モデル変更時の移行状況も把握できます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/rag
+
+- id: d-cosmos-vector-policy-facts
+  objective: "2.3"
+  type: yesno
+  difficulty: 3
+  tags: [cosmos-db, vector, policy]
+  question: |
+    Cosmos DB for NoSQL のベクトル ポリシーとインデックスについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "ベクトル インデックスを作るパスは、コンテナーのベクトル埋め込みポリシーに定義されている必要がある。"
+      answer: true
+    - text: "ベクトル インデックスを作らなくても、`VectorDistance` で検索はできる（ただし総当たりで RU が高くなる）。"
+      answer: true
+    - text: "ベクトルの値は、ベクトル インデックスがあれば通常のインデックスから除外しなくても書き込みの RU は変わらない。"
+      answer: false
+    - text: "`quantizerType` には `product`（既定）と `spherical` がある。"
+      answer: true
+  explanation: |
+    ベクトル インデックスは埋め込みポリシーの情報（次元、距離関数）を使います。ベクトルのパスを通常のインデックスから除外しないと、配列の各要素がインデックスされ、書き込みの RU が大きく増えます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-normalized-dotproduct
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, vector, distance]
+  question: |
+    使用する埋め込みモデルは長さ 1 に正規化されたベクトルを返します。Cosmos DB のベクトル埋め込みポリシーの `distanceFunction` の選び方として正しいものはどれですか。
+  options:
+    - "cosine と dotproduct は同じ順位になるので、どちらでもよい（モデルの推奨に従う。迷えば cosine）"
+    - "正規化されていても euclidean にしなければならない"
+    - "dotproduct は正規化されたベクトルには使えない"
+    - "cosine は Cosmos DB ではサポートされていない"
+  answer: A
+  explanation: |
+    長さ 1 のベクトルでは、内積とコサイン類似度は等しくなり、ユークリッド距離も同じ順位になります。モデルのドキュメントの推奨（多くは cosine）に従うのが無難です。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+    - https://learn.microsoft.com/azure/ai-services/openai/concepts/understand-embeddings
+
+- id: d-cosmos-semantic-cache-cosmos
+  objective: "2.3"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, semantic-cache]
+  question: |
+    すでに Cosmos DB を使っているチャット アプリで、追加のサービスを増やさずにセマンティック キャッシュ（似た質問への過去の回答の再利用）を実装したいです。Cosmos DB での実装として最も適切なものはどれですか。
+  options:
+    - "キャッシュ用のコンテナーに質問の埋め込みと回答を保存し（TTL 付き）、`VectorDistance` で最も近い過去の質問を検索して、スコアがしきい値を満たせば回答を返す"
+    - "Cosmos DB の整合性レベルを Eventual にすると、自動で回答がキャッシュされる"
+    - "変更フィードで回答をキャッシュする"
+    - "Cosmos DB ではセマンティック キャッシュは実装できない"
+  answer: A
+  explanation: |
+    セマンティック キャッシュはベクトル検索としきい値の判定で実装できます。Cosmos DB の TTL を使うと古いキャッシュを自動で削除できます（より低遅延が必要なら Azure Managed Redis も選択肢）。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/gen-ai/semantic-cache
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/time-to-live
+
+# ---------- 2.4 ----------
+- id: d-cosmos-cf-pull-python
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, python]
+  question: |
+    Python のワーカーで変更フィードを読み、埋め込みを更新します。Python SDK には .NET のような変更フィード プロセッサ（リースによる自動分散）がありません。再起動しても続きから読めるようにするには、どうしますか。
+  options:
+    - "プル モデル（`query_items_change_feed`）で読み、レスポンスの継続トークンを永続化しておき、再開時にそのトークンから読む"
+    - "毎回最初から読み直し、処理済みかを全件チェックする"
+    - "整合性レベルを Strong にする"
+    - "Python では変更フィードを読めない"
+  answer: A
+  explanation: |
+    変更フィードのプル モデルでは、アプリが継続トークンを管理します。トークンを保存しておけば、再起動後もその位置から続けて読めます。並列化（フィード範囲ごとの分担）もアプリ側で管理します。Azure Functions の Cosmos DB トリガーを使えば、リースの管理を任せられます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-pull-model
+
+- id: d-cosmos-cf-materialized-view
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, materialized-view]
+  question: |
+    チャンクのコンテナーは `/documentId` でパーティション分割しています。新たに「タグごとの文書一覧」を高速に取得する画面が必要になりましたが、`tags` で絞るクエリはクロスパーティションになり高コストです。最も適切な設計はどれですか。
+  options:
+    - "変更フィードで `tag` をパーティション キーにした別コンテナー（マテリアライズド ビュー）を更新し、画面はそのコンテナーを読む"
+    - "既存コンテナーのパーティション キーを `/tag` に変更する"
+    - "整合性レベルを Eventual にする"
+    - "クロスパーティション クエリを並列度 1 で実行する"
+  answer: A
+  explanation: |
+    アクセス パターンごとに適したパーティション キーのコピーを、変更フィードで最新に保つのが**マテリアライズド ビュー**パターンです。パーティション キーは後から変更できません。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-design-patterns
+
+- id: d-cosmos-cf-cache-invalidation
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, redis]
+  question: |
+    Cosmos DB の製品情報を Azure Managed Redis にキャッシュしています。複数のシステムが Cosmos DB を直接更新するため、アプリ側で更新時にキャッシュを消す方法では漏れが出ます。漏れなく無効化する方法として最も適切なものはどれですか。
+  options:
+    - "Cosmos DB の変更フィードを処理する関数（またはプロセッサ）で、更新されたアイテムに対応する Redis のキーを削除・更新する"
+    - "Redis の TTL を無期限にする"
+    - "各システムに Redis の削除処理を追加してもらう"
+    - "Redis の追い出しポリシーを `allkeys-lru` にする"
+  answer: A
+  explanation: |
+    変更フィードは、どのシステムが更新したかにかかわらず変更を届けるため、キャッシュの無効化や同期の起点として確実です（最新バージョン モードでは削除は流れないので、論理削除を使う）。TTL と組み合わせると安全です。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-design-patterns
+
+- id: d-cosmos-cf-lease-throughput
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, lease]
+  question: |
+    多数の物理パーティションを持つ監視対象コンテナーで変更フィード プロセッサを動かすと、リース コンテナーで 429 が頻発し、処理が遅れます。最も適切な対処はどれですか。
+  options:
+    - "リース コンテナーに十分なスループットを割り当てる（リースの更新・チェックポイントでも RU を消費する）"
+    - "監視対象コンテナーのインデックスを削除する"
+    - "リース コンテナーのパーティション キーを監視対象と同じにする"
+    - "プロセッサのインスタンスを 1 つに減らす"
+  answer: A
+  explanation: |
+    変更フィード プロセッサは、リースの取得・更新・チェックポイントのたびにリース コンテナーを読み書きします。パーティション数やインスタンス数が多いと、リース コンテナーの RU が不足することがあります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/troubleshoot-changefeed-functions
+
+- id: d-cosmos-cf-host
+  objective: "2.4"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, change-feed, hosting]
+  question: |
+    .NET の変更フィード プロセッサを、Azure Functions を使わずに常駐プロセスとして動かしたいです。Azure でのホスティング先として最も適したものはどれですか。
+  options:
+    - "Container Apps（最小レプリカ 1 以上）や AKS など、プロセスを常時実行できるコンピューティング"
+    - "Event Grid"
+    - "Static Web Apps"
+    - "Azure Cache for Redis"
+  answer: A
+  explanation: |
+    変更フィード プロセッサは長時間動き続けるホスト プロセスです。常時稼働のコンテナーやサービスで動かし、インスタンスを増やせば処理を分散できます。Azure Functions の Cosmos DB トリガーは、このホスティングとリース管理をサーバーレスで提供します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-starttime-facts
+  objective: "2.4"
+  type: yesno
+  difficulty: 3
+  tags: [cosmos-db, change-feed]
+  question: |
+    変更フィード（最新バージョン モード）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "変更フィードは、コンテナーにある各アイテムの最新の状態を最初から読み出すことができる。"
+      answer: true
+    - text: "新しいプロセッサは、指定した日時以降の変更から読み始めるように構成できる。"
+      answer: true
+    - text: "変更フィードを読むと、そのぶんの変更が削除される。"
+      answer: false
+    - text: "同じ変更フィードを、独立した複数の消費者がそれぞれ読み取れる。"
+      answer: true
+  explanation: |
+    変更フィードはコンテナーへの変更の永続的なログで、読み取っても消えません。消費者ごとに読み取り位置（リースや継続トークン）を持つため、複数の独立した処理がそれぞれ全変更を読めます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/change-feed
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-order-design
+  objective: "2.4"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, change-feed, ordering]
+  question: |
+    変更フィードで受け取った「文書の作成」と「その文書へのコメント追加」を、作成 → コメントの順に処理しなければなりません。文書とコメントは別のアイテムです。順序を保証する設計として最も適切なものはどれですか。
+  options:
+    - "文書とそのコメントを同じパーティション キー値（例: `/documentId`）にする（論理パーティション内では変更の順序が保証される）"
+    - "プロセッサのインスタンスを 1 つにすれば全体の順序が保証される"
+    - "整合性レベルを Strong にする"
+    - "アイテムの `_ts` で並べ替えれば必ず正しい順序になる"
+  answer: A
+  explanation: |
+    変更フィードの順序は**論理パーティション内**でのみ保証され、パーティションをまたぐ順序は保証されません。順序が必要なアイテムは同じパーティション キー値にします。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/change-feed
