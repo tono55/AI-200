@@ -1,0 +1,390 @@
+# 分野 3 追加問題（3 周目）: 関数アプリの構成とデプロイ（3.4）
+
+- id: s-func-where-config
+  objective: "3.4"
+  type: match
+  difficulty: 2
+  tags: [functions, host-json, app-settings]
+  question: |
+    設定したい内容と、設定する場所を対応付けてください。
+  pairs:
+    - left: "Service Bus トリガーの同時実行数や、ログのレベル・サンプリング"
+      right: "host.json（アプリと一緒にデプロイする）"
+    - left: "Service Bus の名前空間など、環境ごとに変わる接続情報"
+      right: "関数アプリのアプリ設定（環境変数）"
+    - left: "開発者の PC でだけ使う接続情報"
+      right: "local.settings.json（ソース管理に含めない）"
+  distractors:
+    - "requirements.txt"
+  explanation: |
+    host.json はランタイムと拡張機能の動作（全関数に共通）を決めるファイルで、コードと一緒にデプロイされます。環境ごとに変わる値や Key Vault 参照はアプリ設定に置き、ローカル実行用の値は local.settings.json に置きます。requirements.txt は Python の依存パッケージの一覧です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-host-json
+    - https://learn.microsoft.com/azure/azure-functions/functions-app-settings
+
+- id: s-func-appinsights-entra
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, application-insights, entra-id]
+  question: |
+    Application Insights でローカル認証を無効にし、Microsoft Entra 認証によるテレメトリの取り込みだけを許可しました。その後、関数アプリのテレメトリが届かなくなりました。関数アプリのシステム割り当てマネージド ID を使って送信を再開するには、何を構成しますか。
+  options:
+    - "マネージド ID に Application Insights の「Monitoring Metrics Publisher」ロールを付与し、アプリ設定 `APPLICATIONINSIGHTS_AUTHENTICATION_STRING` に `Authorization=AAD` を設定する"
+    - "接続文字列を削除して、インストルメンテーション キーだけを設定する"
+    - "Application Insights のサンプリングを無効にする"
+    - "関数アプリを再起動するだけでよい"
+  answer: A
+  explanation: |
+    Entra 認証のみを許可した Application Insights にテレメトリを送るには、送信する ID に **Monitoring Metrics Publisher** ロールを付与し、関数アプリでは `APPLICATIONINSIGHTS_AUTHENTICATION_STRING` で Entra 認証を指定します（ユーザー割り当て ID なら `ClientId=<クライアント ID>` も付けます）。接続文字列（`APPLICATIONINSIGHTS_CONNECTION_STRING`）は送信先の特定のために引き続き必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/configure-monitoring#enable-microsoft-entra-authentication
+    - https://learn.microsoft.com/azure/azure-monitor/app/azure-ad-authentication
+
+- id: s-func-sampling-excluded
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, application-insights, sampling, host-json]
+  question: |
+    関数アプリの実行回数を Application Insights の `requests` で数えると、実際の実行回数よりかなり少なくなります。トレース ログも一部しか残っていません。`host.json` は既定のままです。最も可能性の高い原因と対処はどれですか。
+  options:
+    - "既定で有効なアダプティブ サンプリングで間引かれている。`logging.applicationInsights.samplingSettings` で無効にするか、`excludedTypes` に `Request` などを指定して対象から外す"
+    - "関数の実行が失敗しているため、記録されていない"
+    - "`requests` テーブルには HTTP トリガーしか記録されない"
+    - "Application Insights のデータ保持期間が短いため"
+  answer: A
+  explanation: |
+    Functions の Application Insights 連携では、既定で**アダプティブ サンプリング**が有効で、テレメトリ量が多いと間引かれます。件数を正確に数えたい種類は `excludedTypes` でサンプリングの対象から外すか、サンプリングを無効にします（コストとのトレードオフ）。
+    `requests` には HTTP 以外のトリガーの関数の実行も記録されます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/configure-monitoring#configure-sampling
+
+- id: s-func-log-level
+  objective: "3.4"
+  type: dropdown
+  difficulty: 2
+  tags: [functions, host-json, logging]
+  question: |
+    Application Insights のコストを下げるため、全体のログは警告以上にし、関数 `embed` のログだけは情報レベルまで残したいです。`host.json` を完成させてください。
+  language: json
+  template: |
+    {
+      "version": "2.0",
+      "logging": {
+        "{{1}}": {
+          "default": "{{2}}",
+          "{{3}}": "Information"
+        }
+      }
+    }
+  blanks:
+    "1":
+      options: ["logLevel", "level", "categories", "applicationInsights"]
+      answer: "logLevel"
+    "2":
+      options: ["Warning", "Information", "Trace", "None"]
+      answer: "Warning"
+    "3":
+      options: ["Function.embed", "embed", "Host.embed", "Functions:embed"]
+      answer: "Function.embed"
+  explanation: |
+    `logging.logLevel` で、カテゴリごとのログ レベルを指定します。`default` が全体の既定で、関数ごとのカテゴリは `Function.<関数名>` です（`Function.<関数名>.User` で、ユーザー コードのログだけを指定することもできます）。実行結果の要約は `Host.Results` カテゴリで、これを下げすぎると `requests` が記録されなくなる点に注意します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/configure-monitoring#configure-log-levels
+
+- id: s-func-python-modules
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, python, deployment, remote-build]
+  question: |
+    Python の関数アプリ（Flex Consumption）を、ソース コードを ZIP にして手作業でデプロイしたところ、`ModuleNotFoundError: No module named 'psycopg'` で関数が起動しません。`requirements.txt` には `psycopg[binary]` が書いてあります。最も適切な対処はどれですか。
+  options:
+    - "リモート ビルドでデプロイする（`func azure functionapp publish <アプリ名>` など）。または、Linux 向けにビルドした依存パッケージを含めたパッケージをデプロイする"
+    - "関数のコードに `pip install psycopg` を書く"
+    - "アプリ設定に `PYTHONPATH` を追加するだけでよい"
+    - "Python のバージョンを 3.8 に下げる"
+  answer: A
+  explanation: |
+    Python の関数アプリでは、`requirements.txt` の依存パッケージをデプロイ時にインストールする必要があります。リモート ビルドを使うと、Azure 上の Linux 環境でパッケージがインストールされます。手元でパッケージを作る場合は、ネイティブ拡張を含むパッケージが Linux 用である必要があります（Windows や macOS でビルドしたものは動きません）。
+    実行時に `pip install` するのは、遅く不安定で、本番では使いません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/python-build-options
+    - https://learn.microsoft.com/azure/azure-functions/recover-python-functions
+
+- id: s-func-flex-http-concurrency
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, flex-consumption, concurrency]
+  question: |
+    Flex Consumption の HTTP 関数は、1 リクエストで CPU を使う重い前処理（PDF の解析）を行います。同時リクエストが増えると、1 インスタンスに多くの要求が集まって処理時間が大きく延びます。より多くのインスタンスに分散させたい場合、最も適切な設定はどれですか。
+  options:
+    - "HTTP トリガーのインスタンスあたりの同時実行数（`perInstanceConcurrency`）を小さくする（`az functionapp scale config set --trigger-type http --trigger-settings perInstanceConcurrency=<値>`）"
+    - "最大インスタンス数を小さくする"
+    - "Always Ready インスタンスを 0 にする"
+    - "インスタンスのメモリ サイズを最小にする"
+  answer: A
+  explanation: |
+    Flex Consumption の HTTP のスケーリングは、インスタンスあたりの同時実行数を基準に行われます（既定値はインスタンスのメモリ サイズによって決まります）。CPU を多く使う処理では、この値を小さくすると 1 インスタンスに集まる要求が減り、より早くスケール アウトします。
+    最大インスタンス数を下げると、逆に分散できなくなります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan#concurrency
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-how-to
+
+- id: s-func-always-ready-groups
+  objective: "3.4"
+  type: yesno
+  difficulty: 3
+  tags: [functions, flex-consumption, always-ready]
+  question: |
+    Flex Consumption の関数アプリに、HTTP 関数が 3 つと、Service Bus トリガーの関数 `embed` があります。Always Ready インスタンスを `http=2`、`function:embed=1` に設定しました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "3 つの HTTP 関数は、HTTP のグループとして 2 つの Always Ready インスタンスを共有する。"
+      answer: true
+    - text: "`embed` には、メッセージがなくても 1 つのインスタンスが常に用意される。"
+      answer: true
+    - text: "Always Ready インスタンスは、実行がない間は課金されない。"
+      answer: false
+    - text: "負荷が増えると、Always Ready インスタンスに加えてオンデマンドのインスタンスが追加される。"
+      answer: true
+  explanation: |
+    Always Ready はグループ（`http`、`blob`、`durable`）か関数（`function:<名前>`）の単位で設定します。常に用意しておくインスタンスなので、実行がなくてもベースラインの料金がかかり、その代わりにコールド スタートを避けられます。負荷が増えたときは、オンデマンドのインスタンスが追加されます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan#always-ready-instances
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-how-to
+
+- id: s-func-cors
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, cors, http]
+  question: |
+    `https://chat.contoso.com` で動く SPA から、ブラウザーで関数アプリの HTTP API を呼ぶと、ブラウザーのコンソールに CORS のエラーが出て失敗します。curl で同じ要求を送ると成功します。最も適切な対処はどれですか。
+  options:
+    - "関数アプリの CORS 設定の許可するオリジンに `https://chat.contoso.com` を追加する"
+    - "関数の承認レベルを Anonymous にする"
+    - "関数のタイムアウトを延ばす"
+    - "許可するオリジンに `*` を設定し、資格情報付きの要求も許可する"
+  answer: A
+  explanation: |
+    CORS はブラウザーが行うチェックなので、curl では問題が出ません。関数アプリ（プラットフォーム）の CORS 設定で、呼び出し元のオリジンを許可します。認証情報（Cookie など）を送る場合は、ワイルドカードではなく具体的なオリジンを指定する必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-how-to-use-azure-function-app-settings#cors
+
+- id: s-func-uami-storage-settings
+  objective: "3.4"
+  type: dropdown
+  difficulty: 3
+  tags: [functions, managed-identity, host-storage]
+  question: |
+    関数アプリのホスト ストレージ（`AzureWebJobsStorage`）に、ユーザー割り当てマネージド ID で接続します。アプリ設定を完成させてください。
+  language: text
+  template: |
+    AzureWebJobsStorage__accountName = stfuncprod
+    AzureWebJobsStorage__{{1}} = managedidentity
+    AzureWebJobsStorage__{{2}} = <ユーザー割り当て ID のクライアント ID>
+  blanks:
+    "1":
+      options: ["credential", "authType", "identity", "auth"]
+      answer: "credential"
+    "2":
+      options: ["clientId", "principalId", "objectId", "resourceId"]
+      answer: "clientId"
+  explanation: |
+    ID ベースの接続で、ユーザー割り当てマネージド ID を使うときは `__credential` に `managedidentity`、`__clientId` に ID のクライアント ID を指定します（システム割り当て ID なら両方とも不要）。ID には、ホスト ストレージに必要なロール（Storage Blob Data Owner など、使うトリガーに応じてキューやテーブルのロールも）を付与します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference#connecting-to-host-storage-with-an-identity
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference#common-properties-for-identity-based-connections
+
+- id: s-func-identity-settings-match
+  objective: "3.4"
+  type: match
+  difficulty: 3
+  tags: [functions, identity-based-connections]
+  question: |
+    トリガーやバインドの `connection` に `MyConn` を指定し、ID ベースの接続にします。接続先と、必要なアプリ設定を対応付けてください。
+  pairs:
+    - left: "Service Bus"
+      right: "MyConn__fullyQualifiedNamespace = <名前空間>.servicebus.windows.net"
+    - left: "Cosmos DB"
+      right: "MyConn__accountEndpoint = https://<アカウント>.documents.azure.com:443/"
+    - left: "Blob Storage（Blob のトリガー・バインド）"
+      right: "MyConn__blobServiceUri = https://<アカウント>.blob.core.windows.net"
+  distractors:
+    - "MyConn = Endpoint=sb://...;SharedAccessKey=..."
+  explanation: |
+    ID ベースの接続では、接続名に `__` で続けて、サービスごとのエンドポイントの設定を置きます。接続文字列（`SharedAccessKey` などを含む値）を使うと、ID ベースではなくキーによる接続になります。各サービスのデータ プレーン ロールの付与も忘れないようにします。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference#configure-an-identity-based-connection
+
+- id: s-func-private-inbound
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, private-endpoint, network]
+  question: |
+    社内システムだけが呼び出す関数アプリ（HTTP トリガー）を、インターネットからはまったく呼べないようにしたいです。社内システムは Azure の VNet 内にあります。最も適切な構成はどれですか。
+  options:
+    - "関数アプリにプライベート エンドポイントを作成し、パブリック ネットワーク アクセスを無効にする（プライベート DNS ゾーンを VNet にリンクする）"
+    - "関数アプリの VNet 統合を構成する"
+    - "関数の承認レベルを Admin にする"
+    - "関数アプリの CORS で社内のオリジンだけを許可する"
+  answer: A
+  explanation: |
+    **受信**をプライベートにするのはプライベート エンドポイントです。パブリック アクセスを無効にすれば、インターネットからは到達できなくなります。VNet 統合は関数アプリからの**送信**のための機能で、受信は制限しません。
+    承認レベルや CORS はインターネットからの到達そのものを防ぐものではありません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-networking-options#private-endpoints
+
+- id: s-func-flex-deployment-storage
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, flex-consumption, deployment]
+  question: |
+    Flex Consumption の関数アプリでは、デプロイしたコードのパッケージはどこに保存され、どのように認証されますか。
+  options:
+    - "指定したストレージ アカウントの Blob コンテナー（デプロイ ストレージ）に保存され、マネージド ID（または接続文字列）でアクセスする"
+    - "関数アプリのローカル ディスクの `wwwroot` にのみ保存される"
+    - "Azure Container Registry に保存される"
+    - "GitHub のリポジトリから実行時に直接読み込まれる"
+  answer: A
+  explanation: |
+    Flex Consumption では、デプロイのパッケージはデプロイ ストレージとして指定した Blob コンテナーに保存され、インスタンスはそこからパッケージを読み込んで実行します。アクセスにはマネージド ID を使うのが推奨です（ID に Storage Blob Data 系のロールが必要）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan#deployment
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-how-to
+
+- id: s-func-host-id-collision
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, host-id, storage]
+  question: |
+    同じストレージ アカウントを、関数アプリ `contoso-rag-ingest-prod-japaneast-01` と `contoso-rag-ingest-prod-japaneast-02` のホスト ストレージとして共有しています。片方のアプリの Timer トリガーが動かなかったり、ホストの起動時にホスト ID の衝突のエラーが出たりします。原因と対処として正しいものはどれですか。
+  options:
+    - "ホスト ID はアプリ名の先頭 32 文字から作られるため、2 つのアプリが同じ ID になっている。アプリごとにストレージ アカウントを分けるか、`AzureFunctionsWebHost__hostid` で別の ID を指定する"
+    - "ストレージ アカウントの SKU が Standard だから"
+    - "Timer トリガーは 1 つのリージョンに 1 つしか作れない"
+    - "アプリ名に数字が含まれているから"
+  answer: A
+  explanation: |
+    Functions のホストは、ホスト ID でストレージ上のロック（Timer のシングルトンなど）やキーを区別します。ホスト ID はアプリ名の先頭 32 文字から作られるため、長い名前で先頭が同じアプリがストレージを共有すると衝突します。アプリごとにストレージを分けるのが推奨です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/storage-considerations#host-id-considerations
+
+- id: s-func-disable-one
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, app-settings, operations]
+  question: |
+    外部 API の障害で、関数 `embed` だけを一時的に止めたいです。他の関数は動かし続け、コードの再デプロイはしたくありません。最も適切な方法はどれですか。
+  options:
+    - "アプリ設定に `AzureWebJobs.embed.Disabled = true` を追加する（ポータルの「無効にする」も同じ設定を変更する）"
+    - "関数アプリ全体を停止する"
+    - "`embed` のコードを削除して再デプロイする"
+    - "`host.json` の `functionTimeout` を 0 にする"
+  answer: A
+  explanation: |
+    `AzureWebJobs.<関数名>.Disabled` を true にすると、その関数のトリガーだけが止まります（Service Bus のメッセージはキューにたまり、再開後に処理されます）。アプリ設定の変更なので再デプロイは不要で、設定を戻せば再開できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/disable-function
+
+- id: s-func-extension-bundle
+  objective: "3.4"
+  type: single
+  difficulty: 3
+  tags: [functions, extension-bundle, host-json]
+  question: |
+    Python の関数アプリに Service Bus トリガーの関数を追加したところ、起動時に「The binding type(s) 'serviceBusTrigger' are not registered」というエラーが出ました。`host.json` を確認すると `extensionBundle` の設定がありません。最も適切な対処はどれですか。
+  options:
+    - "`host.json` に拡張機能バンドル（`Microsoft.Azure.Functions.ExtensionBundle`、例: バージョン `[4.*, 5.0.0)`）を設定する"
+    - "`requirements.txt` に `azure-servicebus` を追加するだけでよい"
+    - "アプリ設定に Service Bus の接続文字列を追加する"
+    - "関数アプリの Python のバージョンを上げる"
+  answer: A
+  explanation: |
+    .NET 以外の言語では、トリガーとバインドの拡張機能は **拡張機能バンドル**として読み込まれ、`host.json` の `extensionBundle` で指定します。設定がないと、HTTP と Timer 以外のトリガーは登録されません。
+    `azure-servicebus` は SDK のパッケージで、トリガーの拡張機能とは別物です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-register#extension-bundles
+
+- id: s-func-identity-storage-multiple
+  objective: "3.4"
+  type: multiple
+  difficulty: 3
+  tags: [functions, managed-identity, rbac]
+  question: |
+    関数アプリ（システム割り当てマネージド ID、ホスト ストレージも ID ベース）に、Storage キューのトリガーの関数 `ingest` と、Blob への出力バインドがあります。同じストレージ アカウントを使います。マネージド ID に付与が必要なロールを **2 つ**選んでください（最小権限）。
+  options:
+    - "Storage Blob Data Owner（ホスト ストレージと Blob の出力に必要）"
+    - "Storage Queue Data Contributor（キューのトリガーでメッセージを読み、処理後に削除するため）"
+    - "Storage Account Contributor"
+    - "Owner（所有者）"
+  answer: [A, B]
+  explanation: |
+    ID ベースのホスト ストレージには Blob のデータ ロール（既定の要件は Storage Blob Data Owner）が必要で、これで Blob の出力もできます。キューのトリガーはメッセージの読み取り・削除（と有害キューへの移動）を行うので、キューのデータ ロールも必要です（有害キューを含めて Storage Queue Data Contributor 以上）。
+    Storage Account Contributor や Owner は管理プレーンの広い権限で、最小権限ではありません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference#grant-permission-to-the-identity
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-storage-queue-trigger#identity-based-connections
+
+- id: s-func-troubleshoot-order
+  objective: "3.4"
+  type: order
+  difficulty: 2
+  tags: [functions, troubleshooting, monitoring]
+  question: |
+    デプロイ後に、Service Bus トリガーの関数がまったく実行されなくなりました。原因を絞り込むための一般的な確認の順に並べてください。
+  items:
+    - "ポータルの関数一覧で関数が認識されているか（インデックス作成のエラーがないか）を確認する"
+    - "アプリ設定（接続の設定、`AzureWebJobs.<関数名>.Disabled` など）と、ID のロールの割り当てを確認する"
+    - "ログ ストリームや Application Insights の `traces` / `exceptions` で、ホストの起動時やリスナーのエラーを確認する"
+    - "原因を修正したら、テスト メッセージを送って実行と完了を確認する"
+  distractors:
+    - "Service Bus の名前空間を削除して作り直す"
+  explanation: |
+    まず関数がホストに読み込まれているか（コードの読み込みエラー、依存パッケージの不足）を確認し、次に設定と権限、そしてホストやトリガーのリスナーのエラー ログを確認します。修正後は実際にメッセージを流して確認します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-monitoring
+    - https://learn.microsoft.com/azure/azure-functions/recover-python-functions
+
+- id: s-func-flex-billing
+  objective: "3.4"
+  type: yesno
+  difficulty: 2
+  tags: [functions, flex-consumption, billing]
+  question: |
+    Flex Consumption プランの課金について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "オンデマンドのインスタンスは、関数を実行している間のメモリ量 × 時間と実行回数に応じて課金される。"
+      answer: true
+    - text: "Always Ready インスタンスを 0 にして、要求がなければ、コンピューティングの課金はほぼ 0 になる。"
+      answer: true
+    - text: "インスタンスのメモリ サイズを大きくしても、課金には影響しない。"
+      answer: false
+  explanation: |
+    Flex Consumption のオンデマンドの課金は、インスタンスのメモリ サイズと実行時間（GB 秒）および実行回数に基づきます。Always Ready インスタンスを設定すると、その分のベースラインの料金が加わります。メモリ サイズを大きくすると、同じ実行時間でも課金は増えます（その代わり CPU やメモリに余裕ができます）。ストレージや Application Insights などの関連リソースは別に課金されます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan#billing
+
+- id: s-func-core-tools-publish
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, core-tools, deployment]
+  question: |
+    開発者が手元の Python プロジェクトを、作成済みの関数アプリ `func-rag-dev` にすばやくデプロイしたいです。Azure Functions Core Tools のコマンドとして正しいものはどれですか。
+  options:
+    - "`func azure functionapp publish func-rag-dev`"
+    - "`func start --publish func-rag-dev`"
+    - "`az functionapp create --name func-rag-dev`"
+    - "`func new --name func-rag-dev`"
+  answer: A
+  explanation: |
+    `func azure functionapp publish <アプリ名>` は、プロジェクトをパッケージにしてデプロイします（Python は既定でリモート ビルド）。`func start` はローカルで実行、`func new` は関数のひな形の作成、`az functionapp create` は関数アプリのリソースの作成です。本番へのデプロイは、CI/CD（GitHub Actions など）から行うのが一般的です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-run-local#publish
