@@ -1,0 +1,266 @@
+# ケーススタディ 2: Woodgrove 社内ナレッジ エージェント（シナリオは cases.yml）
+
+- id: x-woodgrove-ingest-route
+  case: woodgrove-knowledge-agent
+  objective: "3.2"
+  type: single
+  difficulty: 3
+  tags: [event-grid, service-bus, functions, case-study]
+  question: |
+    要件 1 を満たす取り込みの仕組みとして、最も適切なものはどれですか。
+  options:
+    - "ストレージ アカウントのシステム トピックで `BlobCreated` を、サブジェクト フィルター（`/blobServices/default/containers/policies/` で始まる）で絞って Service Bus キューに配信し、関数を Service Bus トリガーで動かす"
+    - "関数を Timer トリガーで 1 日 1 回動かし、コンテナー内の全 PDF を再処理する"
+    - "Event Grid の Webhook で関数の HTTP エンドポイントを直接呼び、関数の中で同期的に全処理を終えてから 200 を返す"
+    - "API の Pod が 1 分ごとに Blob の一覧を取得して、更新日時を比較する"
+  answer: A
+  explanation: |
+    Event Grid でイベントを受け、Service Bus キューを間に置くと、関数が一時的に失敗しても再試行され（最大配信回数を超えれば配信不能キューで調査できる）、関数側のペースで処理できます。サブジェクト フィルターで `policies` コンテナーだけに絞ります。
+    Webhook で同期処理すると、時間のかかる処理で Event Grid のタイムアウト（30 秒）を超えて再配信が発生しやすく、Timer やポーリングでは「数分以内」の要件やコストの面で劣ります。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/handler-service-bus
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+
+- id: x-woodgrove-ingest-dedup
+  case: woodgrove-knowledge-agent
+  objective: "3.1"
+  type: multiple
+  difficulty: 3
+  tags: [service-bus, idempotency, case-study]
+  question: |
+    要件 1 の「同じ更新を二重に取り込まない」を満たすための対策として有効なものを **2 つ**選んでください。Event Grid と Service Bus はどちらも「少なくとも 1 回」の配信です。
+  options:
+    - "取り込み処理を、文書 ID とバージョン（Blob の ETag など）をキーにした UPSERT にして、同じ更新を何度処理しても結果が変わらないようにする"
+    - "Service Bus キューで重複検出を有効にし、メッセージ ID に Event Grid のイベント ID（または Blob の ETag）を使う"
+    - "受信モードを ReceiveAndDelete にする"
+    - "関数の最大インスタンス数を 1 にすれば、重複は発生しない"
+  answer: [A, B]
+  explanation: |
+    重複検出は時間枠の中で同じメッセージ ID の送信を除外できますが、受信側のロック切れによる再配信は防げません。そのため、処理そのものを**べき等**（同じ入力なら何度実行しても同じ結果）にしておくことが基本で、重複検出はその前段で無駄な処理を減らす役割です。
+    ReceiveAndDelete は失敗時にメッセージを失うので要件 1 に反します。インスタンスを 1 にしても再配信は起こります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/duplicate-detection
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: x-woodgrove-base-image
+  case: woodgrove-knowledge-agent
+  objective: "1.2"
+  type: single
+  difficulty: 2
+  tags: [acr-tasks, base-image, case-study]
+  question: |
+    要件 2 を満たす方法として、最も適切なものはどれですか。
+  options:
+    - "Git リポジトリをコンテキストにした ACR タスクを作成し、ベース イメージの更新トリガーを有効にする（ベース イメージは同じレジストリにあるので、更新を検知して自動で再ビルドされる）"
+    - "毎週月曜にタイマーで `docker build` を実行する VM を用意する"
+    - "AKS の `imagePullPolicy: Always` を設定する"
+    - "ACR の geo レプリケーションを追加する"
+  answer: A
+  explanation: |
+    ACR Tasks は、Dockerfile の `FROM` に書かれたベース イメージの依存関係を追跡し、ベース イメージが更新されると自動でアプリのイメージを再ビルドできます（ベース イメージの更新トリガー）。ベース イメージを自分の ACR にインポートしておくと、更新の検知が確実で、外部レジストリの制限の影響も受けにくくなります。
+    `imagePullPolicy: Always` は既存のタグを取り直すだけで、イメージを再ビルドはしません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-base-images
+
+- id: x-woodgrove-geo-pull
+  case: woodgrove-knowledge-agent
+  objective: "1.1"
+  type: yesno
+  difficulty: 2
+  tags: [acr, geo-replication, case-study]
+  question: |
+    Japan West にも DR 用の AKS クラスターを用意し、同じ `woodgroveacr` からイメージを取得します。次の記述が正しいかを答えてください。
+  statements:
+    - text: "Japan West のクラスターも `woodgroveacr.azurecr.io` を指定すればよく、プルは近いレプリカ（Japan West）から行われる。"
+      answer: true
+    - text: "Japan West のクラスター用に、イメージを別のレジストリへ手動でコピーする必要がある。"
+      answer: false
+    - text: "Japan East にプッシュしたイメージは、Japan West のレプリカにも自動で複製される。"
+      answer: true
+  explanation: |
+    geo レプリケーションしたレジストリは、1 つのログイン サーバー名で複数リージョンのレプリカを持ち、プッシュしたイメージは各レプリカに自動で複製されます。プルは近いレプリカにルーティングされるので、リージョン間のデータ転送や遅延を抑えられます。複製には少し時間がかかる点（プッシュ直後のプル）にだけ注意します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-geo-replication
+
+- id: x-woodgrove-pdb
+  case: woodgrove-knowledge-agent
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, pdb, upgrade, case-study]
+  question: |
+    要件 5 のために、運用担当者は「Deployment は `replicas: 2` のまま、`minAvailable: 2` の PodDisruptionBudget を追加する」ことを提案しました。この提案の問題点と、より適切な構成はどれですか。
+  options:
+    - "Pod を 1 つも退避できなくなり、ノードのドレイン（アップグレード）が進まなくなる。`replicas: 3` 以上にしたうえで `minAvailable: 2` の PDB を設定し、Pod が別々のノードに分散するようにする"
+    - "問題はない。PDB があれば AKS がアップグレード中に Pod を自動で 3 つに増やす"
+    - "PDB はアップグレードには効かないため、HPA の `minReplicas: 2` だけでよい"
+    - "`maxUnavailable: 0` の RollingUpdate を設定すれば PDB は不要である"
+  answer: A
+  explanation: |
+    `replicas: 2` で `minAvailable: 2` だと、許可される中断が 0 になり、ドレインが Pod を退避できずに止まります（アップグレードが失敗・停滞します）。退避の余地を作るために `replicas: 3` 以上にし、`minAvailable: 2`（または `maxUnavailable: 1`）にします。さらに、トポロジ分散制約やアンチアフィニティで Pod を別々のノード（ゾーン）に置くと、1 ノードの停止で複数の Pod が同時に止まるのを避けられます。
+    Deployment の `maxUnavailable` はロールアウトのときの設定で、ノードのドレインには効きません。
+  refs:
+    - https://learn.microsoft.com/azure/aks/upgrade-cluster
+    - https://kubernetes.io/docs/tasks/run-application/configure-pdb/
+
+- id: x-woodgrove-pg-identity
+  case: woodgrove-knowledge-agent
+  objective: "2.5"
+  type: order
+  difficulty: 3
+  tags: [postgresql, workload-identity, entra-id, case-study]
+  question: |
+    要件 4 のうち、AKS の API の Pod が PostgreSQL にパスワードなしで接続できるようにします（クラスターでは OIDC 発行者とワークロード ID が有効）。作業を正しい順に並べてください。
+  items:
+    - "ユーザー割り当てマネージド ID を作成し、AKS の ServiceAccount を対象にしたフェデレーション資格情報を追加する"
+    - "PostgreSQL で Microsoft Entra 認証を有効にし、Entra の管理者を設定する"
+    - "Entra 管理者として接続し、マネージド ID に対応するデータベース ロールを作成して必要な権限を付与する"
+    - "Pod でその ServiceAccount を使い、アプリは `DefaultAzureCredential` で取得したアクセス トークンをパスワードとして接続する"
+  distractors:
+    - "マネージド ID のクライアント シークレットを Kubernetes の Secret に保存する"
+  explanation: |
+    まず Pod が名乗る ID（ワークロード ID のフェデレーション）を用意し、PostgreSQL 側で Entra 認証と管理者を構成し、管理者がその ID のロール（`pgaadauth_create_principal` など）を作成して権限を与えます。アプリは `https://ossrdbms-aad.database.windows.net/.default` のスコープのトークンをパスワードとして使い、期限切れに備えて接続ごと（またはプールの接続作成時）に取得し直します。シークレットは使いません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/how-to-configure-sign-in-azure-ad-authentication
+    - https://learn.microsoft.com/azure/aks/workload-identity-overview
+
+- id: x-woodgrove-flag
+  case: woodgrove-knowledge-agent
+  objective: "4.2"
+  type: yesno
+  difficulty: 3
+  tags: [app-configuration, feature-flags, targeting, case-study]
+  question: |
+    要件 3 のために、App Configuration に機能フラグ `Reranker` を作り、ターゲット フィルター（グループ `AI推進室` を 100%、既定の割合 0%）を設定しました。アプリは機能管理ライブラリと動的リフレッシュを使っています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "アプリは、評価のたびに現在のユーザーのユーザー ID とグループをターゲット コンテキストとして渡す必要がある。"
+      answer: true
+    - text: "問題が起きたときは、フラグを無効にすれば、リフレッシュ間隔の経過後に再デプロイなしで全員に対して無効になる。"
+      answer: true
+    - text: "ターゲット フィルターを使うと、グループに属さないユーザーにも、ランダムに 50% の確率で機能が公開される。"
+      answer: false
+  explanation: |
+    ターゲット フィルターは、ターゲット コンテキスト（ユーザー ID とグループ）をもとに、指定したユーザー・グループ・既定の割合で公開を決めます。既定の割合が 0% なら、グループ外のユーザーには公開されません。
+    フラグそのものを無効にすれば、フィルターに関係なくオフになり、アプリはリフレッシュ（ポーリング間隔の経過後）で変更を取り込みます。即時性を高めたいなら、Event Grid の通知でリフレッシュを促す方法もあります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-targetingfilter
+    - https://learn.microsoft.com/azure/azure-app-configuration/enable-dynamic-configuration-python
+
+- id: x-woodgrove-current-chunks
+  case: woodgrove-knowledge-agent
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, partial-index, case-study]
+  question: |
+    要件 7 のため、`chunks` に `is_current boolean` 列を追加し、改定されたら古いチャンクを `false` にします。検索は常に `WHERE is_current` を付けます。改定を重ねるうちに古いチャンクが全体の 70% になり、HNSW での検索で `LIMIT 10` を満たせないことが増えました。最も適切な対処はどれですか。
+  options:
+    - "`CREATE INDEX ... USING hnsw (embedding vector_cosine_ops) WHERE is_current;` のように、現行のチャンクだけを対象にした部分インデックスを作る"
+    - "古いチャンクを削除する"
+    - "`is_current` に B-tree インデックスを作れば、HNSW の結果も十分な件数になる"
+    - "HNSW の `m` を 4 に下げる"
+  answer: A
+  explanation: |
+    HNSW は近い候補を先に取り出してから `WHERE` で絞るので、条件に合わない行が多いと、件数が足りなくなります（`ef_search` の範囲内で候補が尽きる）。検索で常に使う条件が決まっているなら、その条件の**部分インデックス**にすると、インデックスに現行のチャンクだけが入り、件数不足が起きず、インデックスも小さくなります。
+    監査のために削除はできません。pgvector 0.8 以降の反復スキャン（`hnsw.iterative_scan`）も件数不足の対策になりますが、条件が固定ならまず部分インデックスを検討します。
+  refs:
+    - https://github.com/pgvector/pgvector#filtering
+    - https://learn.microsoft.com/azure/postgresql/flexible-server/how-to-optimize-performance-pgvector
+
+- id: x-woodgrove-cache-invalidation
+  case: woodgrove-knowledge-agent
+  objective: "2.12"
+  type: single
+  difficulty: 3
+  tags: [redis, semantic-cache, invalidation, case-study]
+  question: |
+    セマンティック キャッシュには「質問の埋め込み・回答・回答の根拠になった規程の ID（TAG フィールド `policies`）」を Hash で保存し、RediSearch でベクトル インデックスを作っています。規程 `P-102` が改定されたら、その規程にもとづく古い回答が返らないようにしたいです。最も適切な方法はどれですか。
+  options:
+    - "取り込み処理の最後に `FT.SEARCH idx:cache \"@policies:{P\\-102}\" NOCONTENT` で該当するキーを探し、それらを削除する"
+    - "`FLUSHALL` でキャッシュ全体を毎回消す"
+    - "キャッシュの TTL を 30 日に延ばす"
+    - "改定された規程の埋め込みを、キャッシュのベクトル インデックスに追加する"
+  answer: A
+  explanation: |
+    回答の根拠を TAG フィールドに持たせておけば、改定された規程に関係するキャッシュだけを検索して削除できます（TAG の値に含まれる `-` などの記号はエスケープが必要です）。`NOCONTENT` でキーだけを取得すると効率的です。TTL は「最終的には消える」保険として併用します。
+    全体の削除は、関係のない回答まで消えて LLM の呼び出しが一時的に急増します。
+  refs:
+    - https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/tags/
+    - https://learn.microsoft.com/azure/redis/overview-vector-similarity
+
+- id: x-woodgrove-tracing
+  case: woodgrove-knowledge-agent
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, application-insights, case-study]
+  question: |
+    要件 6 のために、API にまず行うべきことはどれですか。
+  options:
+    - "Azure Monitor OpenTelemetry Distro で計装し、PostgreSQL・Redis・LLM（HTTP）の呼び出しを依存関係として記録する（必要に応じて検索などの処理を手動スパンで囲む）"
+    - "API の標準出力に処理時間を `print` し、ログ ファイルから手作業で集計する"
+    - "AKS のノードの CPU 使用率のメトリック アラートだけを設定する"
+    - "Application Insights の可用性テストだけを設定する"
+  answer: A
+  explanation: |
+    OpenTelemetry で計装すると、リクエストと、その処理中の PostgreSQL・Redis・HTTP（LLM）の呼び出しが同じ `operation_Id` を持つ依存関係として記録されます。これにより、遅いリクエストの内訳を KQL で集計できます（例: `dependencies` を `type` や `target` ごとに p95 で比較）。
+    ノードのメトリックや可用性テストでは、1 つの回答の中で何が遅いかはわかりません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: x-woodgrove-kql
+  case: woodgrove-knowledge-agent
+  objective: "4.4"
+  type: dropdown
+  difficulty: 3
+  tags: [kql, dependencies, case-study]
+  question: |
+    要件 6 のため、直近 1 時間で応答が 5 秒を超えたリクエストについて、依存関係の種類ごとの合計時間を比べるクエリを完成させてください。
+  language: kql
+  template: |
+    let slow = requests
+        | where timestamp > ago(1h) and duration > 5000
+        | project operation_Id;
+    dependencies
+    | where timestamp > ago(1h)
+    | where operation_Id {{1}} (slow)
+    | summarize total_ms = sum(duration), calls = count() by {{2}}
+    | {{3}} total_ms desc
+  blanks:
+    "1":
+      options: ["in", "==", "has", "contains"]
+      answer: "in"
+    "2":
+      options: ["type, target", "operation_Id", "resultCode", "timestamp"]
+      answer: "type, target"
+    "3":
+      options: ["order by", "top", "project", "extend"]
+      answer: "order by"
+  explanation: |
+    `let` で遅いリクエストの `operation_Id` の一覧を作り、`in` でその ID に属する依存関係だけに絞ります。`type`（SQL、HTTP、Redis など）と `target`（接続先）ごとに合計時間を出すと、検索・LLM・キャッシュのどれが遅さの原因かがわかります。
+    `==` は単一の値との比較で、表の列と比べることはできません。
+  refs:
+    - https://learn.microsoft.com/kusto/query/in-operator
+    - https://learn.microsoft.com/azure/azure-monitor/app/distributed-trace-data
+
+- id: x-woodgrove-kv-csi
+  case: woodgrove-knowledge-agent
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [aks, key-vault, csi-driver, case-study]
+  question: |
+    LLM の API キーだけは Entra ID 認証に対応していないため、Key Vault に保存しています。要件 4 を満たしながら、API の Pod でこのキーを使う方法として最も適切なものはどれですか。
+  options:
+    - "Secrets Store CSI ドライバー（Key Vault プロバイダー）とワークロード ID を使い、Key Vault のシークレットを Pod にボリュームとしてマウントする"
+    - "キーを ConfigMap に保存して環境変数として渡す"
+    - "キーをコンテナー イメージに焼き込む"
+    - "Key Vault のアクセス キーを Pod の環境変数に入れて、そのキーで Key Vault に接続する"
+  answer: A
+  explanation: |
+    AKS では、Secrets Store CSI ドライバーの Azure Key Vault プロバイダーで、Key Vault のシークレットを Pod のファイルとしてマウントできます（必要なら Kubernetes の Secret に同期も可能）。Key Vault への認証にはワークロード ID を使うので、資格情報を Pod に置かずに済みます。ローテーションの自動取り込み（ポーリング）も設定できます。
+    ConfigMap は暗号化を前提にしていない設定用のリソースで、シークレットには使いません。Key Vault には「アクセス キー」はありません。
+  refs:
+    - https://learn.microsoft.com/azure/aks/csi-secrets-store-driver
+    - https://learn.microsoft.com/azure/aks/csi-secrets-store-identity-access

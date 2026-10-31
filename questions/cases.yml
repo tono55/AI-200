@@ -38,3 +38,25 @@
     2. 代理店で絞り込んでも、指定した件数（上位 10 件）を確実に返す。
     3. 関数のスケール アウト時に、データベースの接続数が上限に達しないようにする。
     4. パスワードを使わずに接続する。
+
+- id: woodgrove-knowledge-agent
+  title: "Woodgrove 社内ナレッジ エージェント"
+  scenario: |
+    **概要**
+    Woodgrove Bank は、社員が社内規程について質問できるナレッジ エージェントを Azure で運用しています。
+
+    **現在の構成**
+    - エージェントの API は AKS 上の Deployment（`replicas: 2`）で、イメージは ACR `woodgroveacr`（Premium、Japan East と Japan West に geo レプリケーション）に保存している。ベース イメージも同じレジストリにインポートしている。
+    - 社内規程の PDF は Blob Storage のコンテナー `policies` に置かれる。PDF のチャンク化と埋め込みの生成は Azure Functions（Flex Consumption）で行う。
+    - チャンクと埋め込みは Azure Database for PostgreSQL フレキシブル サーバー（pgvector、HNSW インデックス）の `chunks` テーブルに保存する。
+    - 会話の短期メモリとセマンティック キャッシュには Azure Managed Redis（RediSearch あり）を使う。
+    - 機能の切り替えには Azure App Configuration の機能フラグを使う。テレメトリは Application Insights（ワークスペース ベース）に送る。
+
+    **要件**
+    1. 規程の PDF がアップロード・更新されたら、数分以内に検索に反映する。取り込み処理が一時的に失敗しても、更新を取りこぼさない。同じ更新を二重に取り込まない。
+    2. ベース イメージに OS の脆弱性修正が入ったら、エージェント API のイメージを自動で再ビルドする。
+    3. 新しい再ランキング機能は、まず「AI 推進室」グループだけに公開し、問題があれば再デプロイなしで即座に無効化できるようにする。
+    4. API の Pod は、パスワードやキーを使わずに PostgreSQL・Redis・Key Vault にアクセスする。
+    5. AKS ノードのアップグレード中も、API は常に 2 つ以上の Pod で応答し続ける。
+    6. 回答が遅いとき、原因が検索・LLM・キャッシュのどこにあるかを KQL で特定できるようにする。
+    7. 監査のため、改定前の規程のチャンクは削除せずに残すが、検索結果には出さない。
