@@ -1,0 +1,448 @@
+# 分野 1 追加問題: App Service のコンテナー（1.3）と Container Apps（1.4）
+
+# ---------- 1.3 ----------
+- id: c-appsvc-slot-setting
+  objective: "1.3"
+  type: single
+  difficulty: 2
+  tags: [app-service, deployment-slots]
+  question: |
+    App Service の staging スロットで新しいコンテナー イメージを検証してから、本番スロットとスワップしています。staging は検証用 DB、本番は本番 DB を使います。
+    スワップ後に本番のアプリが検証用 DB に接続してしまう事故を防ぐには、接続文字列をどう設定しますか。
+  options:
+    - "各スロットに接続文字列を設定し、「デプロイ スロットの設定」（スロット固定）にチェックを入れる"
+    - "接続文字列をコンテナー イメージに埋め込む"
+    - "スワップの前に毎回、手動で接続文字列を書き換える"
+    - "スロットを使わず、本番に直接デプロイする"
+  answer: A
+  explanation: |
+    スロット設定（sticky）にしたアプリ設定・接続文字列は**スロットに残り**、スワップで移動しません。DB の接続先のように環境ごとに固定したい値に使います。
+    Key Vault 参照も、環境ごとに別のボールトを使うならスロット設定にするのが推奨です。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/deploy-staging-slots
+    - https://learn.microsoft.com/azure/app-service/app-service-key-vault-references
+
+- id: c-appsvc-connstr-env
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, configuration, environment-variables]
+  question: |
+    App Service（Linux コンテナー）で、接続文字列を名前 `RagDb`、種類 **PostgreSQL** として登録しました。コンテナー内の Python コードでこの値を読むには、どの環境変数名を参照しますか。
+  options:
+    - "`RagDb`"
+    - "`POSTGRESQLCONNSTR_RagDb`"
+    - "`CUSTOMCONNSTR_RagDb`"
+    - "`APPSETTING_RagDb`"
+  answer: B
+  explanation: |
+    接続文字列は、種類に応じたプレフィックス付きの環境変数としてコンテナーに渡されます（PostgreSQL は `POSTGRESQLCONNSTR_`、SQL Server は `SQLAZURECONNSTR_` / `SQLCONNSTR_`、MySQL は `MYSQLCONNSTR_`、カスタムは `CUSTOMCONNSTR_`）。
+    アプリ設定はプレフィックスなしの名前で渡されます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-common
+
+- id: c-appsvc-linux-setting-name
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, configuration, linux]
+  question: |
+    .NET のアプリは構成キー `Search:TopK` を読みます。Linux の App Service（カスタム コンテナー）でこの値をアプリ設定から渡したいのですが、名前に `:` を使えません。どの名前で登録しますか。
+  options:
+    - "`Search.TopK`"
+    - "`Search__TopK`"
+    - "`Search-TopK`"
+    - "`SEARCH_TOPK`"
+  answer: B
+  explanation: |
+    Linux ではアプリ設定の名前に `:` を使えないため、二重アンダースコア `__` を使います。.NET の構成システムは環境変数の `__` を `:` に変換して読み込みます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-common
+    - https://learn.microsoft.com/aspnet/core/fundamentals/configuration/
+
+- id: c-appsvc-kvref-unresolved
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, key-vault, troubleshooting]
+  question: |
+    App Service のアプリ設定 `DB_PASSWORD` を `@Microsoft.KeyVault(SecretUri=https://kv-prod.vault.azure.net/secrets/db-password)` にしました。コンテナー内で環境変数を表示すると、値が `@Microsoft.KeyVault(SecretUri=...)` という文字列のままです。最も可能性の高い原因はどれですか。
+  options:
+    - "App Service は Key Vault 参照を環境変数として渡さない仕様である"
+    - "参照が解決できていない（アプリの ID に Key Vault の読み取り権限がない、ネットワーク制限で届かない、シークレットが存在しないなど）"
+    - "Key Vault 参照はアプリの再起動を 24 時間待たないと有効にならない"
+    - "Linux では Key Vault 参照が使えない"
+  answer: B
+  explanation: |
+    Key Vault 参照が解決できないと、**参照文字列そのもの**が値になります。原因の多くは、アプリのマネージド ID に `Key Vault Secrets User`（またはアクセス ポリシー）がない、Key Vault のファイアウォールでブロックされている、シークレットが存在しない・無効、構文の誤りです。
+    ポータルのアプリ設定の編集画面や「問題の診断と解決」の Key Vault 参照の診断で状態を確認できます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/app-service-key-vault-references
+
+- id: c-appsvc-kvref-uami
+  objective: "1.3"
+  type: single
+  difficulty: 3
+  tags: [app-service, key-vault, managed-identity]
+  question: |
+    Bicep で App Service を作成するとき、**作成と同時に** Key Vault 参照のアプリ設定を解決させたいと考えています。システム割り当て ID は作成後でないと権限を付与できないため、デプロイ直後の解決に失敗します。最も適切な方法はどれですか。
+  options:
+    - "事前に権限を付与したユーザー割り当てマネージド ID をアプリに割り当て、`keyVaultReferenceIdentity` にその ID のリソース ID を設定する"
+    - "Key Vault の管理者ユーザーを有効にする"
+    - "アプリ設定にシークレットの値を直接書き、後で Key Vault 参照に置き換える"
+    - "Key Vault 参照にバージョンを付ける"
+  answer: A
+  explanation: |
+    ユーザー割り当て ID はアプリより先に作成して Key Vault の権限を付与しておけます。`keyVaultReferenceIdentity` を設定すると、Key Vault 参照の解決にその ID が使われます（既定はシステム割り当て ID）。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/app-service-key-vault-references
+
+- id: c-appsvc-start-time-limit
+  objective: "1.3"
+  type: single
+  difficulty: 2
+  tags: [app-service, container, startup]
+  question: |
+    起動時に 4 分かけて大きなモデル ファイルを読み込む推論コンテナーを App Service にデプロイしたところ、「コンテナーが期限内に応答しなかった」として何度も再起動されます。コードはまだ変更できません。最初に試すべき設定はどれですか。
+  options:
+    - "アプリ設定 `WEBSITES_CONTAINER_START_TIME_LIMIT` を 300 秒以上（最大 1800）にする"
+    - "`WEBSITES_PORT` を削除する"
+    - "Always On を無効にする"
+    - "App Service プランを Free にする"
+  answer: A
+  explanation: |
+    App Service はコンテナーの起動を既定で **230 秒**待ち、それまでに応答しないと再起動します。`WEBSITES_CONTAINER_START_TIME_LIMIT` で最大 1800 秒まで延ばせます。
+    根本的には、モデルの読み込みを非同期にする、イメージを軽くするなどの改善も検討します。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-custom-container
+
+- id: c-appsvc-persistent-storage
+  objective: "1.3"
+  type: single
+  difficulty: 2
+  tags: [app-service, storage]
+  question: |
+    App Service のカスタム コンテナーで、ユーザーがアップロードしたファイルをコンテナー内の `/data/uploads` に保存しています。再起動やスケール アウトのたびにファイルが消えたり、インスタンス間で見えなかったりします。最も適切な対処はどれですか。
+  options:
+    - "Azure Files 共有を `/data/uploads` にマウントする（パス マッピング）。本来は Blob Storage などに保存するのが望ましい"
+    - "インスタンス数を 1 に固定する"
+    - "コンテナー イメージにアップロード ファイルを含める"
+    - "`WEBSITES_PORT` を変更する"
+  answer: A
+  explanation: |
+    コンテナーのファイル システムは一時的で、インスタンス間で共有されません。Azure Storage（Azure Files）をマウントすれば、再起動後も残り、複数インスタンスで共有できます。
+    `/home` を永続化する `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` もありますが、アップロード データはストレージ サービスに置くのが一般的です。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-connect-to-azure-storage
+
+- id: c-appsvc-cd-tag
+  objective: "1.3"
+  type: yesno
+  difficulty: 2
+  tags: [app-service, continuous-deployment, acr]
+  question: |
+    App Service（コンテナー）で ACR からの継続的デプロイ（`az webapp deployment container config --enable-cd true`）を有効にし、イメージ `contoso.azurecr.io/api:main` を設定しています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "ACR に `api:main` がプッシュされると、Webhook 経由で App Service が新しいイメージをプルして再起動する。"
+      answer: true
+    - text: "ACR に `api:1.2.3` がプッシュされた場合も、自動で `api:1.2.3` に切り替わる。"
+      answer: false
+    - text: "この方式は可変タグ（`main`）を使うため、どのビルドが動いているかを追跡しにくい。本番では一意タグを指定して CD パイプラインから更新する方法も検討する。"
+      answer: true
+  explanation: |
+    継続的デプロイは、構成した**同じタグ**にプッシュされたときに Webhook で通知を受け、再プルします。別のタグには反応しません。
+    可変タグは手軽ですが、ロールバックや追跡が難しくなります。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/deploy-ci-cd-custom-container
+
+- id: c-appsvc-health-check
+  objective: "1.3"
+  type: single
+  difficulty: 2
+  tags: [app-service, health-check]
+  question: |
+    App Service の 3 インスタンスのうち 1 つで、推論エンジンがハングして 500 を返し続けることがあります。ハングしたインスタンスにトラフィックを送らないようにし、復旧しなければ自動で置き換えたいと考えています。何を構成しますか。
+  options:
+    - "正常性チェック（ヘルス チェック）のパスを設定する"
+    - "Always On を有効にする"
+    - "デプロイ スロットを追加する"
+    - "ARR アフィニティを有効にする"
+  answer: A
+  explanation: |
+    **正常性チェック**を設定すると、App Service が各インスタンスのパスに定期的に要求を送り、異常なインスタンスをロード バランサーから外し、回復しなければ置き換えます。
+    Always On はアイドル時のアンロードを防ぐ設定、ARR アフィニティは同じインスタンスに要求を固定する設定で、逆効果になりえます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/monitor-instances-health-check
+
+- id: c-appsvc-always-on
+  objective: "1.3"
+  type: single
+  difficulty: 1
+  tags: [app-service, always-on]
+  question: |
+    App Service のコンテナー内で、30 分ごとに埋め込みを再計算するバックグラウンド スレッドを動かしています。夜間にアクセスがないと処理が止まってしまいます。何を有効にしますか。
+  options:
+    - "Always On"
+    - "ARR アフィニティ"
+    - "HTTP/2"
+    - "クライアント証明書"
+  answer: A
+  explanation: |
+    App Service は一定時間アクセスがないとアプリをアンロードします。**Always On**（Basic 以上）を有効にすると、アプリを常に起動した状態に保ちます。
+    定期処理そのものは、Functions の Timer トリガーや Container Apps のスケジュール ジョブに分けるのも良い設計です。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-common
+
+- id: c-appsvc-logs
+  objective: "1.3"
+  type: single
+  difficulty: 1
+  tags: [app-service, logging]
+  question: |
+    App Service のカスタム コンテナーが起動直後に終了します。コンテナーの標準出力に出ているエラーを、Azure CLI でリアルタイムに確認したいと考えています。最初に行うべき手順の組み合わせはどれですか。
+  options:
+    - "`az webapp log config --docker-container-logging filesystem` でコンテナー ログを有効にし、`az webapp log tail` でストリームを見る"
+    - "`az acr task logs` を実行する"
+    - "`kubectl logs` を実行する"
+    - "Application Insights の SDK をコンテナーに追加するまで、ログは見られない"
+  answer: A
+  explanation: |
+    App Service のコンテナー ログ（stdout / stderr）はファイル システムへのログ出力を有効にすると保存され、`az webapp log tail` やポータルのログ ストリームで見られます。Kudu（SCM サイト）からもログを確認できます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/troubleshoot-diagnostic-logs
+
+- id: c-appsvc-zero-downtime
+  objective: "1.3"
+  type: order
+  difficulty: 2
+  tags: [app-service, deployment-slots]
+  question: |
+    App Service（Standard 以上）で、新しいコンテナー イメージをダウンタイムなしで本番に出す手順を順に並べてください。
+  items:
+    - "staging スロットのイメージを新しいタグに更新する"
+    - "staging スロットの URL で動作確認する（必要なら正常性チェック・ウォームアップを待つ）"
+    - "staging と production をスワップする"
+    - "問題があれば、もう一度スワップして元に戻す"
+  distractors:
+    - "production スロットを停止してからイメージを更新する"
+  explanation: |
+    デプロイ スロットでは、staging でウォームアップした状態のアプリを production と入れ替えるため、ダウンタイムなしで切り替えられ、スワップし直せばすぐにロールバックできます。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/deploy-staging-slots
+
+# ---------- 1.4 ----------
+- id: c-aca-internal-ingress
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, ingress]
+  question: |
+    同じ Container Apps 環境に、公開する `frontend` と、`frontend` からだけ呼ばれる `rag-api` があります。`rag-api` をインターネットから直接呼べないようにし、`frontend` からは名前で呼び出したいと考えています。最も適切な構成はどれですか。
+  options:
+    - "`rag-api` のイングレスを `internal` にし、`frontend` からは `http://rag-api`（アプリ名）で呼び出す"
+    - "`rag-api` のイングレスを `external` のままにし、API キーで保護する"
+    - "`rag-api` を別の Container Apps 環境に配置し、パブリック IP で呼び出す"
+    - "`rag-api` のイングレスを無効にし、`frontend` からはレプリカの IP アドレスで呼び出す"
+  answer: A
+  explanation: |
+    イングレスを `internal` にすると、同じ環境（または環境の VNet）内からだけアクセスできます。同じ環境のアプリは**アプリ名**で互いに呼び出せます。
+    イングレスを無効にすると HTTP で呼び出せず、レプリカの IP は変わるため使えません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/ingress-overview
+    - https://learn.microsoft.com/azure/container-apps/connect-apps
+
+- id: c-aca-target-port
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, ingress, troubleshooting]
+  question: |
+    FastAPI（uvicorn）を `--port 8000` で起動するコンテナーを、`az containerapp create --ingress external --target-port 80` でデプロイしました。リビジョンは起動していますが、外部からのアクセスがタイムアウトし、レプリカも準備完了になりません。原因と対処はどれですか。
+  options:
+    - "イングレスのターゲット ポートがアプリの待ち受けポートと違う。`--target-port 8000` に変える"
+    - "外部イングレスでは 443 以外を使えない。アプリを 443 で待ち受ける"
+    - "最小レプリカ数が 0 のため。1 にする"
+    - "Container Apps 環境に VNet が必要"
+  answer: A
+  explanation: |
+    `--target-port` は**コンテナーが待ち受けるポート**です。クライアントは HTTPS（443）でイングレスにアクセスし、イングレスがターゲット ポートに転送します。ポートが違うと既定のプローブも失敗し、レプリカが準備完了になりません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/ingress-overview
+    - https://learn.microsoft.com/azure/container-apps/troubleshoot-deployment-errors
+
+- id: c-aca-workload-profile
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, workload-profiles, gpu]
+  question: |
+    埋め込みモデルを GPU で動かす推論サービスを Container Apps でホストします。予測可能な性能が必要で、特定の GPU を使いたい一方、ほかの軽量な API は従量課金のままにしたいと考えています。環境の構成として最も適切なものはどれですか。
+  options:
+    - "ワークロード プロファイル環境を作り、推論サービスは GPU の専用（Dedicated）ワークロード プロファイル、軽量 API は Consumption プロファイルで動かす"
+    - "推論サービス用に AKS を作る以外に方法はない"
+    - "すべてのアプリの最大レプリカ数を 1,000 にする"
+    - "Consumption プロファイルで CPU の割り当てを最大にする"
+  answer: A
+  explanation: |
+    ワークロード プロファイル環境では、同じ環境内でアプリごとに **Consumption（サーバーレス）** と **Dedicated（専用のマシン種別。GPU を含む）** のプロファイルを使い分けられます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/workload-profiles-overview
+
+- id: c-aca-label-bluegreen
+  objective: "1.4"
+  type: order
+  difficulty: 3
+  tags: [container-apps, revision, blue-green]
+  question: |
+    Container Apps（複数リビジョン モード）でブルーグリーン デプロイを行います。本番トラフィックは現行の `blue` リビジョンが 100% 受けています。手順を正しい順に並べてください。
+  items:
+    - "新しいイメージで `green` リビジョンを作成する（トラフィックの重みは 0%）"
+    - "`green` リビジョンにラベル（例: `staging`）を付け、ラベルの URL で動作確認する"
+    - "トラフィックの重みを `green` 100% に切り替える"
+    - "しばらく監視し、問題がなければ `blue` リビジョンを非アクティブにする"
+  distractors:
+    - "単一リビジョン モードに切り替えて `green` をデプロイする"
+  explanation: |
+    複数リビジョン モードでは、新しいリビジョンをトラフィック 0% で作成し、ラベルの固定 URL でテストしてから重みを切り替えられます。問題があれば重みを `blue` に戻すだけでロールバックできます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/blue-green-deployment
+    - https://learn.microsoft.com/azure/container-apps/revisions
+
+- id: c-aca-rollback
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, revision, rollback]
+  question: |
+    複数リビジョン モードで新しいリビジョン `api--v8` に 100% のトラフィックを流したところ、エラー率が上がりました。1 つ前の `api--v7` はまだアクティブです。最も速く安全にロールバックする方法はどれですか。
+  options:
+    - "`az containerapp ingress traffic set --revision-weight api--v7=100 api--v8=0` で重みを戻す"
+    - "前のイメージで新しいリビジョンをビルドし直す"
+    - "Container Apps 環境を削除して作り直す"
+    - "`api--v8` を削除する（削除すると自動で前のリビジョンに戻る）"
+  answer: A
+  explanation: |
+    リビジョンは不変のスナップショットなので、トラフィックの重みを前のリビジョンに戻すだけでロールバックできます。前のリビジョンが非アクティブなら、先に `az containerapp revision activate` で有効にします。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/traffic-splitting
+    - https://learn.microsoft.com/azure/container-apps/revisions
+
+- id: c-aca-env-facts
+  objective: "1.4"
+  type: yesno
+  difficulty: 3
+  tags: [container-apps, environment, network]
+  question: |
+    Azure Container Apps の環境について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "同じ環境のコンテナー アプリは、同じ仮想ネットワークと同じログの送信先を共有する。"
+      answer: true
+    - text: "既存の環境に、あとからカスタム VNet を追加できる。"
+      answer: false
+    - text: "環境のログの送信先（Log Analytics / Azure Monitor / なし）は環境単位で設定する。"
+      answer: true
+    - text: "1 つのコンテナー アプリを複数の環境にまたがってデプロイできる。"
+      answer: false
+  explanation: |
+    環境はアプリの安全な境界で、VNet とログの構成を共有します。VNet 統合は**環境の作成時**に指定する必要があり、後から追加できません。
+    アプリは 1 つの環境に属します。分離が必要なアプリは別の環境に置きます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/environment
+    - https://learn.microsoft.com/azure/container-apps/networking
+
+- id: c-aca-logs-destination
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, logging]
+  question: |
+    Container Apps のアプリが動いていますが、Log Analytics の `ContainerAppConsoleLogs_CL` に何も入りません。`az containerapp logs show` ではリアルタイムのログが見えます。最も可能性の高い原因はどれですか。
+  options:
+    - "環境のログの送信先が Log Analytics になっていない（なし、または Azure Monitor の診断設定で別の送信先・テーブルに送っている）"
+    - "アプリがポート 80 を使っていない"
+    - "最大レプリカ数が 10 のため"
+    - "Container Apps はアプリのログを保存できない"
+  answer: A
+  explanation: |
+    ログ ストリームはリアルタイムに表示されますが、保存は環境のログ構成に依存します。送信先が Log Analytics なら `ContainerAppConsoleLogs_CL` / `ContainerAppSystemLogs_CL` に、Azure Monitor（診断設定）なら設定した送信先・テーブル（`ContainerAppConsoleLogs` など）に入ります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/log-options
+
+- id: c-aca-secret-volume
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, secrets, volume]
+  question: |
+    コンテナー内のライブラリが、クライアント証明書を**ファイル**（`/mnt/certs/client.pem`）として読む必要があります。証明書の内容は Key Vault にあります。Container Apps でどう渡すのが適切ですか。
+  options:
+    - "Key Vault 参照のシークレットとして定義し、シークレット ボリュームとして `/mnt/certs` にマウントする（ファイル名はシークレット名になる）"
+    - "証明書をコンテナー イメージに含める"
+    - "環境変数に証明書を貼り付け、起動スクリプトでファイルに書き出す"
+    - "Azure Files に証明書を置いて誰でも読めるようにする"
+  answer: A
+  explanation: |
+    Container Apps のシークレットは環境変数として参照するほか、**ボリュームとしてマウント**でき、各シークレットがファイル（ファイル名 = シークレット名）になります。値は Key Vault 参照にできます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/manage-secrets
+
+- id: c-aca-job-vs-app
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, jobs]
+  question: |
+    Service Bus にジョブが入ったら、文書の埋め込みを計算して終了するバッチ処理を Container Apps で動かしたいと考えています。HTTP の受け付けは不要で、処理が終わったらコンテナーは終了してよいです。最も適したリソースはどれですか。
+  options:
+    - "イベント ドリブンのトリガーを持つ Container Apps ジョブ（KEDA の azure-servicebus スケーラー）"
+    - "外部イングレスを持つコンテナー アプリ（最小レプリカ 1）"
+    - "HTTP スケール ルールを持つコンテナー アプリ"
+    - "App Service の Always On"
+  answer: A
+  explanation: |
+    **Container Apps ジョブ**は、開始して処理を終えたら終了するワークロード向けです。トリガーは手動、スケジュール（cron）、イベント ドリブン（KEDA スケーラー）から選べます。
+    常時稼働のアプリよりも、処理がないときにリソースを使いません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/jobs
+
+- id: c-aca-revision-mode-facts
+  objective: "1.4"
+  type: yesno
+  difficulty: 2
+  tags: [container-apps, revision]
+  question: |
+    Container Apps のリビジョンについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "単一リビジョン モードでは、新しいリビジョンが準備できると古いリビジョンは自動で非アクティブになる。"
+      answer: true
+    - text: "複数リビジョン モードで、トラフィックの設定に `latestRevision: true` の重みがあると、新しいリビジョンを作るたびにその重みが新しいリビジョンに向く。"
+      answer: true
+    - text: "非アクティブなリビジョンは、もう一度アクティブにすることはできない。"
+      answer: false
+    - text: "`--revision-suffix` を指定すると、リビジョン名を `<アプリ名>--<サフィックス>` の形にできる。"
+      answer: true
+  explanation: |
+    非アクティブなリビジョンは一覧に保持され（既定 100 個まで）、`az containerapp revision activate` で再びアクティブにできます。
+    `latestRevision: true` を使うと「常に最新に向ける」設定、特定のリビジョン名を指定すると固定の重みになります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/revisions
+    - https://learn.microsoft.com/azure/container-apps/traffic-splitting
+
+- id: c-aca-registry-identity
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, acr, managed-identity]
+  question: |
+    Container Apps が ACR からイメージをプルするとき、パスワードを使わない構成にしたいと考えています。CLI の指定として最も適切なものはどれですか。
+  options:
+    - "`--registry-server contoso.azurecr.io --registry-identity system`（ID に AcrPull を付与）"
+    - "`--registry-server contoso.azurecr.io --registry-username contoso --registry-password <管理者パスワード>`"
+    - "`--secrets acr-pass=<パスワード>` だけを指定する"
+    - "ACR を匿名プル可能にする"
+  answer: A
+  explanation: |
+    `--registry-identity` にシステム割り当て ID（`system`）またはユーザー割り当て ID のリソース ID を指定すると、その ID でプルします。ID には ACR の AcrPull が必要です。
+    ユーザー割り当て ID なら、アプリ作成前に権限を付与しておけるため、初回デプロイでのプル失敗を避けやすくなります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/managed-identity-image-pull
