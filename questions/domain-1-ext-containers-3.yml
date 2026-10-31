@@ -1,0 +1,473 @@
+# 分野 1 追加問題（3 周目）: Container Apps / KEDA / AKS / トラブルシューティング（1.4〜1.7）
+
+# ---------- 1.4 ----------
+- id: c-aca-azure-files
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, volumes, azure-files]
+  question: |
+    推論アプリの全レプリカで、同じモデル ファイル（約 8 GB）を読み取り専用で共有したいです。イメージに含めるとビルドとプルが遅くなるため、ストレージから読み込みたいと考えています。Container Apps での構成として最も適切なものはどれですか。
+  options:
+    - "Azure Files の共有を Container Apps 環境のストレージとして登録し（`az containerapp env storage set`、読み取り専用）、アプリのボリューム（`storageType: AzureFile`）としてマウントする"
+    - "`EmptyDir` のボリュームを使い、レプリカ間で共有する"
+    - "モデル ファイルをシークレットとして保存し、ボリュームとしてマウントする"
+    - "モデル ファイルを環境変数に Base64 で入れる"
+  answer: A
+  explanation: |
+    Container Apps では、Azure Files の共有を**環境**にストレージとして登録し、アプリのテンプレートでボリュームとして参照してコンテナーにマウントします。読み取り専用にすれば、アプリから誤って変更されません。`EmptyDir` はレプリカごとの一時領域でレプリカ間では共有されず、シークレットや環境変数は大きなファイルには使えません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/storage-mounts
+    - https://learn.microsoft.com/azure/container-apps/storage-mounts-azure-files
+
+- id: c-aca-default-probes
+  objective: "1.4"
+  type: yesno
+  difficulty: 3
+  tags: [container-apps, health-probes]
+  question: |
+    HTTP イングレス（ターゲット ポート 8080）を有効にしたコンテナー アプリで、プローブを何も定義していません。次の記述が正しいかを答えてください。
+  statements:
+    - text: "Container Apps は、ターゲット ポートに対する既定のプローブ（TCP）を自動で追加する。"
+      answer: true
+    - text: "既定のプローブは、アプリがポートで待ち受けていれば成功するので、アプリの内部の不具合（DB に接続できないなど）までは検知しない。"
+      answer: true
+    - text: "アプリの起動に時間がかかる場合でも、プローブを自分で定義する必要はない。"
+      answer: false
+  explanation: |
+    イングレスが有効でプローブが未定義の場合、Container Apps はターゲット ポートへの TCP の既定のプローブを追加します。ポートが開いているかしか見ないので、アプリの健全性を正しく判定したいなら HTTP のプローブ（`/healthz` など）を定義します。起動に時間がかかるアプリでは、startup プローブで猶予を与えないと、再起動を繰り返すことがあります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/health-probes
+
+- id: c-aca-serverless-gpu
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, gpu, workload-profiles]
+  question: |
+    社内向けの小規模な言語モデルの推論 API を Container Apps で動かします。利用は平日の日中に集中し、夜間や週末はほとんど要求がありません。GPU が必要ですが、使っていない時間の GPU のコストは払いたくありません。最も適切な構成はどれですか。
+  options:
+    - "ワークロード プロファイル環境で、サーバーレス GPU（従量課金の GPU プロファイル）を使い、最小レプリカ数を 0 にする"
+    - "専用の GPU ワークロード プロファイルを 24 時間 1 ノード以上で動かす"
+    - "従量課金（Consumption）の CPU だけのプロファイルで、レプリカ数を増やす"
+    - "Container Apps では GPU を使えないので、必ず AKS を使う"
+  answer: A
+  explanation: |
+    **サーバーレス GPU** は、従量課金のワークロード プロファイルで GPU を使い、0 までスケールできるため、要求がない時間は GPU の料金がかかりません（使った時間だけ課金されます）。その代わり、0 から起動するときはモデルの読み込みを含むコールド スタートがあります。常時一定の負荷があるなら専用の GPU プロファイルも選択肢です。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/gpu-serverless-overview
+    - https://learn.microsoft.com/azure/container-apps/workload-profiles-overview
+
+- id: c-aca-ip-restrictions
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, ingress, ip-restrictions]
+  question: |
+    外部イングレスを持つ管理用 API を、社内ネットワークの 2 つのグローバル IP 範囲からだけ呼べるようにしたいです。VNet 構成の変更はしたくありません。最も適切な方法はどれですか。
+  options:
+    - "イングレスの IP アクセス制限で、2 つの IP 範囲を「許可」ルールとして追加する（許可ルールがあると、それ以外は拒否される）"
+    - "CORS で 2 つの IP 範囲を許可する"
+    - "イングレスを無効にする"
+    - "シークレットに IP 範囲を保存する"
+  answer: A
+  explanation: |
+    Container Apps のイングレスには IP アクセス制限があり、許可または拒否のルールを CIDR で指定できます（1 つのアプリのルールはすべて許可か、すべて拒否のどちらかに揃えます）。許可ルールを設定すると、一致しない送信元からの要求は拒否されます。CORS はブラウザーの制御で、送信元 IP による制限にはなりません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/ip-restrictions
+
+- id: c-aca-dynamic-sessions
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, dynamic-sessions, ai-agents, security]
+  question: |
+    AI エージェントが生成した Python コード（信頼できないコード）を実行して、データ分析の結果をユーザーに返す機能を作ります。ユーザーごとに隔離された環境で、すばやく実行したいです。最も適切な Azure の機能はどれですか。
+  options:
+    - "Azure Container Apps の動的セッション（コード インタープリターのセッション プール）を使い、ユーザーやセッションごとの識別子で隔離された環境でコードを実行する"
+    - "API のコンテナーの中で `exec()` でコードを実行する"
+    - "AKS の 1 つの Pod で、全ユーザーのコードを順番に実行する"
+    - "Azure Functions の HTTP 関数の中で `subprocess` で実行する"
+  answer: A
+  explanation: |
+    **動的セッション**は、Hyper-V で隔離されたサンドボックスを、あらかじめ用意されたプールからすぐに割り当てる機能で、LLM が生成したコードのような信頼できないコードの実行に向いています。セッションの識別子ごとに環境が分かれるので、ユーザー間でデータが混ざりません。自分の API のプロセス内でコードを実行すると、シークレットや他のユーザーのデータにアクセスされる危険があります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/sessions
+    - https://learn.microsoft.com/azure/container-apps/sessions-code-interpreter
+
+- id: c-aca-yaml-update
+  objective: "1.4"
+  type: dropdown
+  difficulty: 2
+  tags: [container-apps, yaml, azure-cli]
+  question: |
+    既存のコンテナー アプリの構成を YAML に書き出し、スケール ルールとプローブを編集してから反映します。コマンドを完成させてください。
+  language: bash
+  template: |
+    az containerapp {{1}} -n rag-api -g rg-ai -o {{2}} > app.yaml
+    # app.yaml を編集する
+    az containerapp update -n rag-api -g rg-ai {{3}} app.yaml
+  blanks:
+    "1":
+      options: ["show", "list", "export", "revision show"]
+      answer: "show"
+    "2":
+      options: ["yaml", "json", "table", "tsv"]
+      answer: "yaml"
+    "3":
+      options: ["--yaml", "--file", "--template", "-f"]
+      answer: "--yaml"
+  explanation: |
+    `az containerapp show -o yaml` で現在の構成を YAML で取得し、編集して `az containerapp update --yaml` で反映できます。CLI の引数で表しにくい設定（複数のスケール ルールやプローブなど）をまとめて変更するのに便利です。テンプレートの変更（リビジョン スコープ）なので、新しいリビジョンが作成されます。
+  refs:
+    - https://learn.microsoft.com/cli/azure/containerapp#az-containerapp-update
+    - https://learn.microsoft.com/azure/container-apps/azure-resource-manager-api-spec
+
+# ---------- 1.5 ----------
+- id: c-keda-tcp-rule
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, tcp-scaling]
+  question: |
+    gRPC ではなく独自の TCP プロトコルで長時間接続を受け付ける推論サーバーを、Container Apps（TCP イングレス）で動かします。同時接続数に応じてスケールさせたいです。最も適切なスケール ルールはどれですか。
+  options:
+    - "TCP スケール ルール（`concurrentConnections` でレプリカあたりの同時接続数を指定）"
+    - "HTTP スケール ルール（`concurrentRequests`）"
+    - "CPU スケール ルールだけ"
+    - "cron スケール ルール"
+  answer: A
+  explanation: |
+    Container Apps には HTTP と TCP の組み込みのスケール ルールがあり、TCP イングレスのアプリでは**同時 TCP 接続数**でスケールできます。HTTP スケール ルールは HTTP の要求を数えるので、独自の TCP プロトコルには使えません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-redis-list
+  objective: "1.5"
+  type: dropdown
+  difficulty: 2
+  tags: [container-apps, keda, redis]
+  question: |
+    ジョブを Redis のリスト `jobs:embed` に `LPUSH` しています。リストの長さが 1 レプリカあたり 20 件を超えたらワーカーを増やすスケール ルールを完成させてください。
+  language: yaml
+  template: |
+    rules:
+      - name: redis-list
+        custom:
+          type: {{1}}
+          metadata:
+            address: redis-ai.japaneast.redis.azure.net:10000
+            enableTLS: "true"
+            {{2}}: jobs:embed
+            {{3}}: "20"
+          auth:
+            - secretRef: redis-password
+              triggerParameter: password
+  blanks:
+    "1":
+      options: ["redis", "azure-redis-streams", "redis-cluster-streams", "azure-queue"]
+      answer: "redis"
+    "2":
+      options: ["listName", "queueName", "key", "stream"]
+      answer: "listName"
+    "3":
+      options: ["listLength", "messageCount", "queueLength", "pendingEntriesCount"]
+      answer: "listLength"
+  explanation: |
+    KEDA の Redis リスト スケーラーは `type: redis` で、`listName` と、レプリカあたりの目標の長さ `listLength` を指定します。Streams を使う場合は別のスケーラー（`redis-streams`、`pendingEntriesCount` など）です。Azure Managed Redis は TLS（ポート 10000）なので `enableTLS` を有効にします。
+  refs:
+    - https://keda.sh/docs/latest/scalers/redis-lists/
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-async-design
+  objective: "1.5"
+  type: single
+  difficulty: 3
+  tags: [container-apps, keda, async, architecture]
+  question: |
+    文書の要約 API（Container Apps）は、1 件の処理に LLM で 2〜5 分かかります。現在は HTTP の要求の中で同期的に処理しており、混雑時にタイムアウトや、HTTP スケールによる大量のレプリカの起動が起きています。最も適切な構成の見直しはどれですか。
+  options:
+    - "API は要求を Service Bus キューに入れてすぐ 202 を返し、別のワーカー アプリ（またはイベント ドリブンのジョブ）がキューの長さに応じて KEDA でスケールして処理する"
+    - "HTTP スケール ルールの `concurrentRequests` を 1,000 にする"
+    - "イングレスのタイムアウトを 1 時間にする"
+    - "最大レプリカ数を 1 にする"
+  answer: A
+  explanation: |
+    長時間の処理は、受け付けと処理を分ける**非同期パターン**にします。API はすぐに応答し、キューにたまったジョブ数に応じてワーカーがスケールするので、急な負荷もキューが吸収し、下流（LLM）の制限に合わせてワーカーの最大数を調整できます。結果は状態確認の API や通知で返します。
+  refs:
+    - https://learn.microsoft.com/azure/architecture/patterns/async-request-reply
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-revision-scaling
+  objective: "1.5"
+  type: yesno
+  difficulty: 3
+  tags: [container-apps, revisions, scaling]
+  question: |
+    複数リビジョン モードで、リビジョン A（トラフィック 80%）とリビジョン B（20%）が有効です。どちらも HTTP スケール ルール（`concurrentRequests: 10`）を持っています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "各リビジョンは、それぞれが受け取る負荷とスケール ルールに応じて、独立してスケールする。"
+      answer: true
+    - text: "最小・最大レプリカ数やスケール ルールはリビジョンのテンプレートの一部なので、リビジョンごとに異なる値にできる。"
+      answer: true
+    - text: "非アクティブにしたリビジョンも、最小レプリカ数の分だけ動き続けて課金される。"
+      answer: false
+  explanation: |
+    スケールの設定はテンプレート（リビジョン スコープ）に含まれるため、リビジョンごとに持ち、それぞれ独立してスケールします。非アクティブなリビジョンはレプリカが 0 になり、課金されません。カナリア リリース中は、新しいリビジョンの最小レプリカ数も適切に設定しておくと、トラフィックの移行がスムーズになります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/revisions
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-no-scale-order
+  objective: "1.5"
+  type: order
+  difficulty: 3
+  tags: [container-apps, keda, troubleshooting]
+  question: |
+    Service Bus のスケール ルールを設定したワーカーが、キューに 500 件たまっているのに 0 レプリカのままです。原因を調べる一般的な順に並べてください。
+  items:
+    - "スケール ルールの `metadata`（名前空間、キュー名、`messageCount`）が実際のリソースと一致しているかを確認する"
+    - "システム ログ（`ContainerAppSystemLogs_CL` など）で、スケーラーの認証エラーやメトリック取得のエラーが出ていないかを確認する"
+    - "スケール ルールが使う ID（またはシークレット）に、キューのメトリックを読む権限があるかを確認する"
+    - "修正後、キューにメッセージを入れてレプリカ数が増えることを確認する"
+  distractors:
+    - "Container Apps 環境を削除して作り直す"
+  explanation: |
+    まず設定の誤り（キュー名の打ち間違いなど）を確認し、次にプラットフォームのログでスケーラーが何に失敗しているかを見て、認証・認可の問題を解消します。KEDA のスケーラーはアプリとは別にキューの長さを取得するので、アプリ自体が Service Bus に接続できていても、スケール ルールの認証が別途必要です。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://learn.microsoft.com/azure/container-apps/troubleshooting
+
+- id: c-keda-zero-capable
+  objective: "1.5"
+  type: multiple
+  difficulty: 2
+  tags: [container-apps, scale-to-zero]
+  question: |
+    Container Apps で `minReplicas: 0` にして、負荷がないときに 0 レプリカまでスケール インできるスケール ルールを **2 つ**選んでください。
+  options:
+    - "HTTP スケール ルール"
+    - "Azure Service Bus のカスタム（KEDA）スケール ルール"
+    - "CPU 使用率のスケール ルール"
+    - "メモリ使用率のスケール ルール"
+  answer: [A, B]
+  explanation: |
+    HTTP や、キューなどの外部のイベント ソースを見るスケール ルールは、負荷がなければ 0 にでき、要求やメッセージが来たら 0 から起動できます。CPU やメモリのルールは、動いているレプリカの使用率を測る仕組みなので、0 レプリカから判断できず、0 へのスケールには使えません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+# ---------- 1.6 ----------
+- id: c-aks-topology-spread
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, availability-zones, topology-spread]
+  question: |
+    3 つの可用性ゾーンにノードがある AKS で、API の Deployment（`replicas: 6`）の Pod が 1 つのゾーンに偏って配置されることがあります。ゾーン障害の影響を抑えるため、ゾーンごとに Pod 数がほぼ均等になるようにしたいです。マニフェストで何を指定しますか。
+  options:
+    - "`topologySpreadConstraints` で `topologyKey: topology.kubernetes.io/zone`、`maxSkew: 1` を指定する"
+    - "`nodeSelector` で特定のゾーンを指定する"
+    - "`replicas` を 3 の倍数にするだけでよい"
+    - "Service の `sessionAffinity` を設定する"
+  answer: A
+  explanation: |
+    **トポロジ分散制約**は、ゾーンやノードなどのトポロジのドメイン間で Pod 数の差（skew）を指定した値以内に保つようスケジューラーに指示します。`whenUnsatisfiable` で、満たせないときに配置を止める（`DoNotSchedule`）か、できるだけ守る（`ScheduleAnyway`）かを選べます。`nodeSelector` で 1 つのゾーンを指定すると、逆に偏ります。
+  refs:
+    - https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
+    - https://learn.microsoft.com/azure/aks/availability-zones
+
+- id: c-aks-network-policy
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, network-policy, security]
+  question: |
+    AKS 内で動くベクトル DB（ラベル `app: vectordb`）には、API の Pod（ラベル `app: rag-api`）からだけ接続させたいです。他の Pod からの接続は拒否します。最も適切な方法はどれですか。
+  options:
+    - "ネットワーク ポリシーのエンジンを有効にしたクラスターで、`app: vectordb` を対象に、`app: rag-api` からの受信だけを許可する NetworkPolicy を作成する"
+    - "ベクトル DB の Service を `type: LoadBalancer` にする"
+    - "ベクトル DB を別の名前空間に移すだけでよい"
+    - "API の Pod に `hostNetwork: true` を設定する"
+  answer: A
+  explanation: |
+    Kubernetes の既定では、Pod 間の通信はすべて許可されています。**NetworkPolicy** で対象の Pod を選び、許可する送信元（Pod のラベルや名前空間）を指定すると、それ以外の受信は拒否されます。ポリシーを強制するには、クラスターでネットワーク ポリシーのエンジン（Azure、Calico、Cilium など）が有効になっている必要があります。名前空間を分けるだけでは通信は制限されません。
+  refs:
+    - https://learn.microsoft.com/azure/aks/use-network-policies
+    - https://kubernetes.io/docs/concepts/services-networking/network-policies/
+
+- id: c-aks-kustomize
+  objective: "1.6"
+  type: single
+  difficulty: 2
+  tags: [aks, kustomize, manifests]
+  question: |
+    同じアプリのマニフェストを dev と prod の 2 つの AKS 名前空間にデプロイします。違いはレプリカ数・リソース量・イメージのタグだけです。マニフェストをコピーして 2 セット管理するのをやめたい場合、最も適切な方法はどれですか。
+  options:
+    - "Kustomize で共通の `base` と環境ごとの `overlays`（差分のパッチ）を作り、`kubectl apply -k overlays/prod` のように適用する（または Helm の values で切り替える）"
+    - "dev と prod で同じマニフェストを使い、本番の設定は手作業で `kubectl edit` する"
+    - "環境ごとに別の AKS クラスターを作れば、マニフェストは 1 つでよい"
+    - "ConfigMap にマニフェスト全体を入れる"
+  answer: A
+  explanation: |
+    Kustomize は、共通のマニフェスト（base）に環境ごとの差分（overlay）を重ねて最終的なマニフェストを生成します。`kubectl` に組み込まれており、`-k` で適用できます。Helm のテンプレートと values でも同じ目的を達成できます。手作業の編集は、次のデプロイで上書きされ、環境の差分が追跡できなくなります。
+  refs:
+    - https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/
+    - https://learn.microsoft.com/azure/aks/kubernetes-helm
+
+- id: c-aks-rollout-match
+  objective: "1.6"
+  type: match
+  difficulty: 2
+  tags: [aks, kubectl, rollout]
+  question: |
+    やりたいことと、`kubectl rollout` のサブコマンドを対応付けてください。
+  pairs:
+    - left: "新しいイメージへの更新が完了するまで待ち、成功したかを確認する"
+      right: "kubectl rollout status deployment/rag-api"
+    - left: "過去のリビジョン（変更履歴）を一覧する"
+      right: "kubectl rollout history deployment/rag-api"
+    - left: "直前のリビジョンに戻す"
+      right: "kubectl rollout undo deployment/rag-api"
+    - left: "マニフェストを変えずに、全 Pod を順番に作り直す（ConfigMap の変更の反映など）"
+      right: "kubectl rollout restart deployment/rag-api"
+  distractors:
+    - "kubectl delete deployment/rag-api"
+  explanation: |
+    `status` はロールアウトの完了を待つので CI/CD の確認に使え、`history` と `undo`（`--to-revision` で指定も可）でロールバックできます。`restart` はローリング更新の仕組みで Pod を順番に再作成するので、ダウンタイムなしで環境変数としてマウントした ConfigMap の変更などを反映できます。
+  refs:
+    - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/
+    - https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+
+- id: c-aks-statefulset
+  objective: "1.6"
+  type: single
+  difficulty: 3
+  tags: [aks, statefulset, storage]
+  question: |
+    AKS 上で、3 つのノードからなる自前のベクトル DB クラスターを動かします。各ノード（Pod）は固定の名前（`vectordb-0`、`vectordb-1` など）でお互いを見つけ、それぞれ専用の永続ディスクを持つ必要があります。Pod が別のノードで再作成されても、同じ名前と同じディスクを使い続けます。最も適切なリソースはどれですか。
+  options:
+    - "StatefulSet（`volumeClaimTemplates` で Pod ごとの PVC を作り、ヘッドレス Service で固定の DNS 名を与える）"
+    - "Deployment と、全 Pod で共有する 1 つの PVC"
+    - "DaemonSet"
+    - "Job"
+  answer: A
+  explanation: |
+    **StatefulSet** は、Pod に順序付きの固定の名前を与え、`volumeClaimTemplates` で Pod ごとに専用の PVC を作ります。Pod が再作成されても同じ名前と同じボリュームが割り当てられ、ヘッドレス Service で `vectordb-0.<サービス名>` のような固定の DNS 名で到達できます。Deployment の Pod は交換可能で、名前やディスクの対応は保証されません。
+  refs:
+    - https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/
+    - https://learn.microsoft.com/azure/aks/concepts-storage
+
+# ---------- 1.7 ----------
+- id: c-trouble-private-dns
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, dns, private-endpoint, troubleshooting]
+  question: |
+    AKS の Pod から、プライベート エンドポイントを作成した PostgreSQL（`pg-rag.postgres.database.azure.com`）に接続すると、パブリック IP に名前解決されて接続が拒否されます。同じ VNet の VM からはプライベート IP に解決されます。AKS は別の VNet にあり、VM の VNet とピアリングされています。最も可能性の高い原因はどれですか。
+  options:
+    - "プライベート DNS ゾーン（`privatelink.postgres.database.azure.com`）が、AKS の VNet にリンクされていない"
+    - "PostgreSQL の `max_connections` が小さい"
+    - "Pod の CPU 上限が小さい"
+    - "AKS の kubelet ID に AcrPull ロールがない"
+  answer: A
+  explanation: |
+    プライベート エンドポイントの名前解決は、プライベート DNS ゾーンが**リンクされた VNet**からだけ機能します。ピアリングしていても、ゾーンを AKS の VNet にリンクしないと、Pod（CoreDNS → Azure DNS）はパブリックのレコードを返します。`kubectl debug` などで Pod から `nslookup` して確認し、ゾーンのリンク（またはカスタム DNS の転送設定）を見直します。
+  refs:
+    - https://learn.microsoft.com/azure/private-link/private-endpoint-dns
+    - https://learn.microsoft.com/azure/aks/coredns-custom
+
+- id: c-trouble-evicted
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, eviction, resources, troubleshooting]
+  question: |
+    夜間のバッチの実行中に、同じノード上の API の Pod が `Evicted` 状態になり、別のノードで作り直されていました。Pod のメッセージには「The node was low on resource: memory」とあります。API の Pod には `resources` が設定されていません。最も適切な対策はどれですか。
+  options:
+    - "API とバッチの両方に適切な `requests` と `limits`（メモリ）を設定し、スケジューラーがノードのメモリを過剰に詰め込まないようにする（必要ならバッチを別のノード プールに分ける）"
+    - "API の Pod の `restartPolicy` を Never にする"
+    - "Service の type を変更する"
+    - "Pod のログ レベルを下げる"
+  answer: A
+  explanation: |
+    ノードのメモリが逼迫すると、kubelet は Pod を**退避（eviction）**させます。`requests` のない Pod（BestEffort）は最初に退避の対象になります。各 Pod に実際の使用量に合った `requests` / `limits` を設定すれば、スケジューラーがノードの容量を正しく計算し、退避されにくくなります。負荷の性質が違うワークロードは、ノード プールを分けるのも有効です。
+  refs:
+    - https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/
+    - https://learn.microsoft.com/azure/aks/developer-best-practices-resource-management
+
+- id: c-trouble-replicaset-quota
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, resource-quota, troubleshooting]
+  question: |
+    `kubectl apply` で Deployment を作成したところ、`kubectl get deploy` は `READY 0/3` のままで、`kubectl get pods` には Pod が 1 つも表示されません（`Pending` すらありません）。次にどこを確認するのが最も適切ですか。
+  options:
+    - "`kubectl describe replicaset`（または名前空間のイベント）で、Pod の作成自体が失敗した理由（ResourceQuota の超過、アドミッションの拒否など）を確認する"
+    - "`kubectl logs` で Pod のログを確認する"
+    - "ノードの OS を再起動する"
+    - "Service の selector を確認する"
+  answer: A
+  explanation: |
+    Pod が存在しない場合、問題は Pod の起動ではなく**作成**の段階です。Deployment は ReplicaSet を作り、ReplicaSet が Pod を作成しますが、名前空間の ResourceQuota の超過や、ポリシー（アドミッション コントローラー）による拒否があると、ReplicaSet のイベントに `FailedCreate` として理由が記録されます。Pod がないので `kubectl logs` では調べられません。
+  refs:
+    - https://kubernetes.io/docs/concepts/policy/resource-quotas/
+    - https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/
+
+- id: c-trouble-cpu-throttling
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, cpu-limits, throttling, latency]
+  question: |
+    API の Pod の平均 CPU 使用率は `limits.cpu`（500m）の 60% 程度なのに、ピーク時に応答の遅延が大きく跳ね上がります。Container Insights を見ると、CPU のスロットリングが多発しています。最も適切な対応はどれですか。
+  options:
+    - "短時間のバースト時に CPU の上限に当たってスロットリングされているので、`limits.cpu` を引き上げる（または外す）か、レプリカ数を増やして 1 Pod あたりの負荷を下げる"
+    - "メモリの `limits` を下げる"
+    - "readiness プローブを削除する"
+    - "Pod の数を 1 に減らす"
+  answer: A
+  explanation: |
+    CPU の `limits` は短い時間の単位で強制されるため、平均の使用率が低くても、瞬間的なバーストで上限に当たるとスロットリングされ、遅延が増えます。遅延に敏感なアプリでは CPU の上限を緩めるか設定しない（`requests` は適切に設定する）、または水平にスケールして 1 Pod の負荷を下げます。メモリの上限は CPU のスロットリングとは関係ありません。
+  refs:
+    - https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    - https://learn.microsoft.com/azure/azure-monitor/containers/container-insights-analyze
+
+- id: c-trouble-snat
+  objective: "1.7"
+  type: single
+  difficulty: 3
+  tags: [aks, container-apps, snat, outbound]
+  question: |
+    負荷テストで同時要求を増やすと、API から外部の LLM エンドポイントへの接続が断続的にタイムアウトします。LLM 側にはエラーの記録がなく、API はリクエストごとに新しい HTTP クライアントを作成しています。最も可能性の高い原因と対策はどれですか。
+  options:
+    - "送信接続の SNAT ポートが枯渇している。HTTP クライアントを再利用して接続をプールし（Keep-Alive）、必要なら NAT ゲートウェイで送信ポートを増やす"
+    - "LLM のモデルが古い"
+    - "Pod のメモリ上限が大きすぎる"
+    - "readiness プローブの間隔が短い"
+  answer: A
+  explanation: |
+    同じ宛先への送信接続を大量に新規作成すると、送信元の SNAT ポートを使い切り、新しい接続が確立できなくなります。HTTP クライアントを使い回して接続を再利用すれば、必要なポート数が大幅に減ります。それでも足りない場合は、NAT ゲートウェイなどで送信のポート数を増やします。
+  refs:
+    - https://learn.microsoft.com/azure/aks/nat-gateway
+    - https://learn.microsoft.com/azure/load-balancer/troubleshoot-outbound-connection
+
+- id: c-trouble-kubectl-top
+  objective: "1.7"
+  type: single
+  difficulty: 2
+  tags: [aks, kubectl, metrics]
+  question: |
+    ノードのメモリが逼迫しているとアラートが出ました。名前空間 `rag` の中で、現在メモリを最も多く使っている Pod をすぐに特定したいです。最も簡単なコマンドはどれですか。
+  options:
+    - "`kubectl top pod -n rag --sort-by=memory`"
+    - "`kubectl get pod -n rag -o wide`"
+    - "`kubectl describe node`"
+    - "`kubectl logs -n rag --all-containers`"
+  answer: A
+  explanation: |
+    `kubectl top pod` は metrics-server（AKS では既定で有効）から Pod の現在の CPU・メモリ使用量を取得し、`--sort-by` で並べ替えられます。`kubectl describe node` ではノードに割り当てられた requests / limits の合計は見られますが、実際の使用量の順位はわかりません。過去の推移を見るには Container Insights などを使います。
+  refs:
+    - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_top/
+    - https://learn.microsoft.com/azure/aks/monitor-aks

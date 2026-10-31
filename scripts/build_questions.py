@@ -194,6 +194,14 @@ def build(out_path: Path | None) -> int:
         type_counts[q["type"]] = type_counts.get(q["type"], 0) + 1
     print(f"questions: {len(questions)}  objectives covered: "
           f"{sum(1 for n in counts.values() if n)}/{len(counts)}  types: {type_counts}")
+    domain_counts: dict[str, int] = {}
+    for q in questions:
+        d = str(q["objective"]).split(".")[0]
+        domain_counts[d] = domain_counts.get(d, 0) + 1
+    if questions:
+        shares = "  ".join(f"{d}: {n} ({n * 100 / len(questions):.1f}%)"
+                           for d, n in sorted(domain_counts.items()))
+        print(f"domains: {shares}")
 
     if errors:
         print(f"\n{len(errors)} error(s):", file=sys.stderr)
