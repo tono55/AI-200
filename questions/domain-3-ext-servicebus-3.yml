@@ -1,0 +1,400 @@
+# 分野 3 追加問題（3 周目）: Service Bus（3.1）
+
+- id: s-sb-session-state
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, sessions, session-state]
+  question: |
+    会話ごとにセッションを使ってメッセージを順番に処理しています。ワーカーが処理の途中で落ちて別のワーカーがそのセッションを引き継いだとき、「どのステップまで終わったか」を外部のデータベースを使わずに引き継ぎたいと考えています。最も適切な方法はどれですか。
+  options:
+    - "セッションの状態（session state）に進捗を保存し、引き継いだワーカーは `get_state()` で読み取る"
+    - "メッセージのアプリケーション プロパティに進捗を書き込む"
+    - "セッション ID に進捗を含める"
+    - "ワーカーのメモリに進捗を保持する"
+  answer: A
+  explanation: |
+    セッションには、そのセッションに紐付く任意のデータ（**セッション状態**）を保存できます。`session.set_state()` で進捗を保存しておけば、別のワーカーがセッションを受け取ったときに `get_state()` で続きから処理できます。状態は Service Bus 側に保存されるので、ワーカーが落ちても失われません。
+    受信済みのメッセージのプロパティは書き換えられず、ワーカーのメモリは落ちると消えます。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-sessions
+
+- id: s-sb-sessions-facts
+  objective: "3.1"
+  type: yesno
+  difficulty: 3
+  tags: [service-bus, sessions]
+  question: |
+    セッションを有効にしたキューに、会話 ID をセッション ID として送信しています。ワーカーは 3 つです。次の記述が正しいかを答えてください。
+  statements:
+    - text: "あるセッションをワーカー A が受信している間、そのセッションのメッセージはワーカー B や C には配信されない。"
+      answer: true
+    - text: "1 つのワーカーは、同時に複数のセッションを処理できる（セッションごとに受信者を作る）。"
+      answer: true
+    - text: "セッションを有効にしたキューに、セッション ID のないメッセージを送信しても、通常どおり処理される。"
+      answer: false
+    - text: "会話の数が 3 より多くても、各ワーカーが処理を終えたセッションを手放して次のセッションを受け取れば、すべての会話が処理される。"
+      answer: true
+  explanation: |
+    セッションはワーカーが**ロック**して受信するので、同じセッションのメッセージは 1 つのワーカーにだけ順番に届きます。ワーカーは次の空いているセッション（`next_available_session`）を受け取って処理し、終わったら閉じて次へ進みます。
+    セッションが有効なエンティティでは、セッション ID のないメッセージの送信はエラーになります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-sessions
+
+- id: s-sb-rule-action
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, topics, rules, actions]
+  question: |
+    トピック `docs` のサブスクリプション `priority-embed` には、SQL フィルター `tier = 'premium'` のルールがあります。このサブスクリプションに届いたメッセージにだけ、ワーカーが優先度を判断できるよう `priority = 'high'` というプロパティを追加したいです。送信側は変更できません。最も適切な方法はどれですか。
+  options:
+    - "ルールに SQL アクション `SET priority = 'high'` を追加する"
+    - "サブスクリプションの自動転送を設定する"
+    - "相関フィルターに変更する"
+    - "トピックで重複検出を有効にする"
+  answer: A
+  explanation: |
+    SQL フィルターのルールには**アクション**を付けられ、フィルターに一致したメッセージのプロパティを、サブスクリプションに入るときに追加・変更・削除できます（`SET`、`REMOVE`）。変更されるのはそのサブスクリプションのコピーだけなので、他のサブスクリプションには影響しません。
+    相関フィルターはアクションを持てません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/topic-filters
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-sql-rule-action
+
+- id: s-sb-topic-unmatched
+  objective: "3.1"
+  type: yesno
+  difficulty: 3
+  tags: [service-bus, topics, filters]
+  question: |
+    トピック `events` には、`type = 'doc'` のメッセージだけを受け取るサブスクリプション `embed` が 1 つだけあります。送信側が `type = 'image'` のメッセージを送信しました。次の記述が正しいかを答えてください（既定の設定）。
+  statements:
+    - text: "送信は成功する。"
+      answer: true
+    - text: "このメッセージはどのサブスクリプションにも入らず、受信もされない。"
+      answer: true
+    - text: "このメッセージは、トピックの配信不能キューに移される。"
+      answer: false
+  explanation: |
+    トピックへの送信は、どのサブスクリプションのルールにも一致しなくても成功し、メッセージはどこにも保存されずに失われます（配信不能にもなりません）。取りこぼしを避けたいなら、「どれにも一致しなかったもの」を受け取る監査用のサブスクリプション（`1=1` や、他の条件の否定のフィルター）を用意します。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/topic-filters
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-queues-topics-subscriptions
+
+- id: s-sb-transaction
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, transactions, send-via]
+  question: |
+    ワーカーはキュー `chunks` からメッセージを受け取り、埋め込みを作ったら、次の段階のキュー `index` に結果を送信してから、元のメッセージを完了します。送信の直後にワーカーが落ちると、元のメッセージが再配信されて `index` に同じ結果が 2 つ入ってしまいます。「完了」と「次のキューへの送信」を一体で行う方法として、最も適切なものはどれですか。
+  options:
+    - "同じ名前空間の中で、受信したエンティティを経由する（send-via）トランザクションで、`index` への送信と元のメッセージの完了をまとめて行う"
+    - "先に元のメッセージを完了してから送信する"
+    - "`index` キューで ReceiveAndDelete を使う"
+    - "2 つのキューを別々の名前空間に分ける"
+  answer: A
+  explanation: |
+    Service Bus のトランザクションでは、受信したメッセージの完了（や配信不能化）と、別のエンティティへの送信を、**送信経由（send-via）**でまとめてコミットできます。どちらかが失敗すれば両方取り消されます。対象は同じ名前空間のエンティティに限られます。
+    先に完了すると、送信前に落ちたときにメッセージが失われます。受信側をべき等にしておくことも引き続き有効です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-transactions
+
+- id: s-sb-geo-replication
+  objective: "3.1"
+  type: match
+  difficulty: 3
+  tags: [service-bus, disaster-recovery, premium]
+  question: |
+    Service Bus Premium の障害対策の機能と、その説明を対応付けてください。
+  pairs:
+    - left: "geo 障害復旧（Geo-DR）"
+      right: "名前空間の構成（キューやトピックなどのメタデータ）だけを別リージョンに複製し、エイリアスで切り替える"
+    - left: "geo レプリケーション"
+      right: "メタデータに加えて、メッセージのデータも別リージョンに複製する"
+    - left: "可用性ゾーン"
+      right: "同じリージョン内の複数のデータ センターにまたがって冗長化する"
+  distractors:
+    - "重複検出"
+  explanation: |
+    Geo-DR はメタデータだけを複製するので、切り替え後は空のエンティティから再開することになり、旧リージョンに残ったメッセージは別途回収が必要です。メッセージも失いたくない場合は geo レプリケーションを使います。ゾーンの障害には可用性ゾーン（Premium で既定で有効）で対応します。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-geo-dr
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-geo-replication
+
+- id: s-sb-roles-match
+  objective: "3.1"
+  type: match
+  difficulty: 2
+  tags: [service-bus, rbac, managed-identity]
+  question: |
+    マネージド ID に割り当てる最小限の Service Bus の組み込みロールを対応付けてください。
+  pairs:
+    - left: "API: キュー `jobs` にジョブを送信するだけ"
+      right: "Azure Service Bus Data Sender"
+    - left: "ワーカー: キュー `jobs` からメッセージを受信して完了する"
+      right: "Azure Service Bus Data Receiver"
+    - left: "運用ツール: 送受信に加えて、キューやサブスクリプションの作成・削除もする"
+      right: "Azure Service Bus Data Owner"
+  distractors:
+    - "Reader（閲覧者）"
+  explanation: |
+    データの送信と受信は別のロールです。スコープは名前空間だけでなく、キューやトピック単位にも絞れるので、API には `jobs` キューへの送信だけを許可する、といった最小権限にできます。Reader は管理プレーンの読み取りで、メッセージは扱えません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-managed-service-identity
+
+- id: s-sb-ordering-facts
+  objective: "3.1"
+  type: yesno
+  difficulty: 3
+  tags: [service-bus, ordering, competing-consumers]
+  question: |
+    セッションを使わないキューで、5 つのワーカーが同時に受信しています（競合コンシューマー）。次の記述が正しいかを答えてください。
+  statements:
+    - text: "送信した順に処理が完了することは保証されない。"
+      answer: true
+    - text: "あるメッセージの処理が失敗して再配信されると、後から送信されたメッセージより後に処理されることがある。"
+      answer: true
+    - text: "ワーカーを 1 つにすれば、再試行があっても厳密な順序が常に保証される。"
+      answer: false
+  explanation: |
+    キューの取り出しはおおむね FIFO ですが、複数のワーカーが並行して処理すると完了の順番はばらばらになり、失敗したメッセージの再配信でも順序が入れ替わります。厳密な順序が必要なデータの単位（会話や注文など）には、セッションを使います。
+    ワーカーが 1 つでも、ロック切れや中断（abandon）による再配信のタイミングによって、順序が崩れることがあります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-sessions
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+
+- id: s-sb-peek-dlq
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, peek, dead-letter]
+  question: |
+    配信不能キューにたまったメッセージの内容と配信不能の理由を、調査のために一覧したいです。調査ツールが内容を読んだことで、メッセージがロックされたり、配信回数が増えたり、削除されたりしないようにするには、どの操作を使いますか。
+  options:
+    - "`peek_messages()`（ピーク）"
+    - "PeekLock で受信し、すぐに `abandon_message()` する"
+    - "ReceiveAndDelete で受信する"
+    - "`complete_message()` で完了する"
+  answer: A
+  explanation: |
+    **ピーク**は、メッセージをロックせず、配信回数も変えずに内容とプロパティ（`dead_letter_reason`、`dead_letter_error_description` など）を読み取ります。調査や監視に適しています。
+    PeekLock + abandon は配信回数が増え、ReceiveAndDelete や complete はメッセージを削除してしまいます。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-browsing
+
+- id: s-sb-max-wait-time
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, python-sdk, receiver]
+  question: |
+    常駐ワーカーで `with client.get_queue_receiver("jobs", max_wait_time=5) as receiver: for msg in receiver: ...` と書いたところ、キューが 5 秒以上空になるとワーカーのプロセスが終了してしまい、その後のメッセージが処理されません。原因として正しいものはどれですか。
+  options:
+    - "`max_wait_time` を指定すると、その時間メッセージが届かなければ受信のループ（イテレーター）が終了する。常駐させるなら外側でループを続けるか、`max_wait_time` を指定しない"
+    - "5 秒でメッセージのロックが切れたため"
+    - "キューの TTL が 5 秒になっているため"
+    - "受信モードが既定で ReceiveAndDelete だから"
+  answer: A
+  explanation: |
+    Python SDK の受信者を反復処理するとき、`max_wait_time` を指定すると「その時間内に次のメッセージが来なければ反復を終える」動作になります。短時間のバッチには便利ですが、常駐ワーカーでは処理が止まります。常駐させる場合は、外側のループで受信を続けるか、`max_wait_time` を指定しない（無期限に待つ）ようにします。
+    既定の受信モードは PeekLock です。
+  refs:
+    - https://learn.microsoft.com/python/api/azure-servicebus/azure.servicebus.servicebusreceiver
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-python-how-to-use-queues
+
+- id: s-sb-settlement-match
+  objective: "3.1"
+  type: match
+  difficulty: 2
+  tags: [service-bus, settlement]
+  question: |
+    PeekLock で受信したメッセージの決済（settlement）操作と、その結果を対応付けてください。
+  pairs:
+    - left: "complete"
+      right: "メッセージがキューから削除される"
+    - left: "abandon"
+      right: "ロックが解除され、配信回数が 1 増えて再び受信できるようになる"
+    - left: "defer"
+      right: "キューに残るが通常の受信では届かず、シーケンス番号を指定して後から受信する"
+    - left: "dead-letter"
+      right: "理由を付けて配信不能キューに移される"
+  distractors:
+    - "メッセージの本文が書き換えられる"
+  explanation: |
+    一時的なエラーで再試行したいなら abandon（またはロック切れを待つ）、処理順を待つなら defer、二度と成功しない不正なメッセージなら dead-letter を使います。abandon を繰り返して最大配信回数を超えると、自動で配信不能になります。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-deferral
+
+- id: s-sb-ttl-calc
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, ttl]
+  question: |
+    キューの既定のメッセージ TTL（DefaultMessageTimeToLive）は 1 時間です。送信側が、あるメッセージの `time_to_live` を 1 日に設定して送信しました。このメッセージの実際の有効期間はどれですか。
+  options:
+    - "1 時間（キューの既定の TTL より長い値は、キューの値に切り詰められる）"
+    - "1 日（メッセージ側の指定が優先される）"
+    - "25 時間（両方の合計）"
+    - "送信がエラーになる"
+  answer: A
+  explanation: |
+    メッセージの TTL はエンティティの既定の TTL を超えられず、超える値を指定するとエンティティの値に合わせられます（エラーにはなりません）。メッセージ側で**短く**することはできます。
+    期限切れのメッセージは、「有効期限切れ時の配信不能」を有効にしていなければ破棄されます。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-expiration
+
+- id: s-sb-vs-storage-queue
+  objective: "3.1"
+  type: match
+  difficulty: 2
+  tags: [service-bus, storage-queue, service-selection]
+  question: |
+    要件に合うキューのサービスを対応付けてください。
+  pairs:
+    - left: "会話ごとの順序保証と、重複検出、トランザクションが必要"
+      right: "Service Bus キュー"
+    - left: "1 つのキューに 80 GB を超える大量のメッセージをためたい。機能はシンプルでよく、コストを最小にしたい"
+      right: "Storage キュー"
+    - left: "1 つのメッセージを、条件に応じて複数の購読者に配る"
+      right: "Service Bus トピック"
+  distractors:
+    - "Event Hubs のコンシューマー グループ"
+  explanation: |
+    Service Bus はセッション（順序）、重複検出、トランザクション、配信不能キュー、トピックとフィルターなどの高度な機能を持ちます。Storage キューはストレージ アカウントの容量まで大量にためられ、シンプルで安価ですが、メッセージ サイズは 64 KB までで、順序保証などの機能はありません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-azure-and-service-bus-queues-compared-contrasted
+
+- id: s-sb-dlq-reasons
+  objective: "3.1"
+  type: match
+  difficulty: 3
+  tags: [service-bus, dead-letter]
+  question: |
+    配信不能キューのメッセージに付いている `DeadLetterReason` と、その原因を対応付けてください。
+  pairs:
+    - left: "MaxDeliveryCountExceeded"
+      right: "受信して完了されないまま、最大配信回数を超えた（処理の失敗やロック切れの繰り返し）"
+    - left: "TTLExpiredException"
+      right: "有効期限が切れた（有効期限切れ時の配信不能が有効な場合）"
+    - left: "アプリが指定した理由（例: InvalidPayload）"
+      right: "受信側のコードが `dead_letter_message()` で明示的に配信不能にした"
+  distractors:
+    - "送信者の認証に失敗した"
+  explanation: |
+    理由を見れば対処が変わります。MaxDeliveryCountExceeded なら処理の例外やロック期間との関係を、TTLExpiredException ならワーカーの停止や処理の遅れを調べます。アプリで明示的に配信不能にする場合は、調査しやすいよう理由と説明を必ず付けます。
+    認証に失敗した送信は、そもそもキューに入りません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues
+
+- id: s-sb-identity-client
+  objective: "3.1"
+  type: dropdown
+  difficulty: 2
+  tags: [service-bus, python-sdk, managed-identity]
+  question: |
+    接続文字列を使わず、マネージド ID でキュー `jobs` にメッセージを送信するコードを完成させてください。
+  language: python
+  template: |
+    from azure.identity import DefaultAzureCredential
+    from azure.servicebus import ServiceBusClient, ServiceBusMessage
+
+    client = ServiceBusClient(
+        fully_qualified_namespace="{{1}}",
+        credential=DefaultAzureCredential(),
+    )
+    with client:
+        with client.{{2}}(queue_name="jobs") as sender:
+            sender.send_messages({{3}}('{"docId": "a1"}'))
+  blanks:
+    "1":
+      options: ["sb-contoso.servicebus.windows.net", "https://sb-contoso.servicebus.windows.net/jobs", "Endpoint=sb://sb-contoso.servicebus.windows.net/", "sb-contoso"]
+      answer: "sb-contoso.servicebus.windows.net"
+    "2":
+      options: ["get_queue_sender", "get_queue_receiver", "get_sender", "create_sender"]
+      answer: "get_queue_sender"
+    "3":
+      options: ["ServiceBusMessage", "str", "bytes", "EventData"]
+      answer: "ServiceBusMessage"
+  explanation: |
+    Entra ID 認証では、`fully_qualified_namespace` に**名前空間のホスト名**（`<名前空間>.servicebus.windows.net`）を指定し、資格情報を渡します。`Endpoint=...` は接続文字列の形式です。送信には `get_queue_sender`、メッセージは `ServiceBusMessage` で作ります（`EventData` は Event Hubs の型）。ID には Azure Service Bus Data Sender ロールが必要です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-python-how-to-use-queues
+
+- id: s-sb-premium-scale
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, premium, messaging-units, throttling]
+  question: |
+    Standard 層の Service Bus で、キャンペーン中に送受信が急増すると、サーバー ビジー（スロットリング）のエラーが増え、処理時間のばらつきも大きくなります。予測可能な性能が必要です。最も適切な対応はどれですか。
+  options:
+    - "Premium 層にして、必要な性能に合わせてメッセージング ユニット（MU）を割り当てる（自動スケールも構成できる）"
+    - "Standard 層のまま、キューの最大サイズを大きくする"
+    - "プリフェッチ数を 1,000 にする"
+    - "メッセージの TTL を短くする"
+  answer: A
+  explanation: |
+    Standard 層は共有のリソースで動くため、負荷が高いとスロットリングがかかり、性能も他の利用者の影響を受けます。Premium 層は専用のリソース（メッセージング ユニット）を割り当てるので、性能が予測しやすく、MU を増やしてスループットを上げられます。
+    キューのサイズや TTL はスループットとは関係ありません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-premium-messaging
+    - https://learn.microsoft.com/azure/service-bus-messaging/automate-update-messaging-units
+
+- id: s-sb-fan-in-forward
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, auto-forward, topics]
+  question: |
+    トピック `docs` のサブスクリプション `embed` のメッセージを、既存のワーカー（キュー `embed-jobs` から受信する作り）でそのまま処理したいです。ワーカーのコードを変えずに実現する方法として、最も適切なものはどれですか。
+  options:
+    - "サブスクリプション `embed` の自動転送（`ForwardTo`）を `embed-jobs` キューに設定する"
+    - "サブスクリプション `embed` の配信不能メッセージの転送先を `embed-jobs` にする"
+    - "トピック `docs` を削除して、送信側にキュー `embed-jobs` へ送り直してもらう"
+    - "キュー `embed-jobs` をトピックのサブスクリプションとして登録する"
+  answer: A
+  explanation: |
+    サブスクリプションの**自動転送**を設定すると、サブスクリプションに入ったメッセージが同じ名前空間のキュー（またはトピック）に自動で移されます。これにより、トピックからの配信を既存のキュー前提のワーカーで処理できます（複数の発生元を 1 つのキューにまとめる fan-in にも使えます）。
+    配信不能メッセージの転送先は、通常のメッセージには効きません。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-auto-forwarding
+
+- id: s-sb-client-lifetime
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, client, connection]
+  question: |
+    HTTP API が、リクエストのたびに `ServiceBusClient` と送信者を作成して 1 件送信し、閉じています。負荷が上がると送信の遅延が大きくなり、接続関連のエラーも出始めました。最も適切な改善はどれですか。
+  options:
+    - "`ServiceBusClient` と送信者をアプリの起動時に作成し、プロセス全体で再利用する"
+    - "リクエストごとに新しい名前空間を作成する"
+    - "受信モードを ReceiveAndDelete にする"
+    - "メッセージの TTL を長くする"
+  answer: A
+  explanation: |
+    クライアントの作成は AMQP 接続の確立や認証を伴う高コストな処理です。クライアントと送信者は長期間使うことを前提に設計されているので、アプリ全体で使い回します（スレッド セーフかどうかは SDK の説明を確認し、必要なら非同期版を使います）。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-performance-improvements
+
+- id: s-sb-filter-on-properties
+  objective: "3.1"
+  type: single
+  difficulty: 3
+  tags: [service-bus, topics, filters, properties]
+  question: |
+    送信側はメッセージ本文に JSON `{"docType": "manual", ...}` を入れて、トピックに送信しています。サブスクリプションに SQL フィルター `docType = 'manual'` を設定しましたが、どのメッセージも届きません。原因と対処として正しいものはどれですか。
+  options:
+    - "フィルターはメッセージの本文を評価せず、システム プロパティとアプリケーション プロパティだけを対象にする。送信側で `application_properties` に `docType` を設定する"
+    - "SQL フィルターでは文字列を比較できないため、相関フィルターにする"
+    - "本文が JSON の場合は `$.docType = 'manual'` と書く"
+    - "サブスクリプションでセッションを有効にする"
+  answer: A
+  explanation: |
+    トピックのフィルター（SQL・相関とも）は、メッセージのプロパティ（`subject`、`correlation_id` などのシステム プロパティと、アプリケーション プロパティ）だけを評価し、本文は見ません。ルーティングに使う値は、送信時にアプリケーション プロパティとして付けておきます。
+    単純な等価条件なら、SQL フィルターより評価の軽い相関フィルターも使えます。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/topic-filters
