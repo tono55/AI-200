@@ -1,0 +1,188 @@
+# ケーススタディの問題（シナリオは questions/cases.yml）
+# objective はその問題が主に問う出題範囲。分野をまたがる判断を練習する。
+
+# ---------- Contoso サポート アシスタント ----------
+- id: x-contoso-worker-scale
+  case: contoso-support-rag
+  objective: "1.5"
+  type: single
+  difficulty: 2
+  tags: [case-study, container-apps, keda, service-bus]
+  question: |
+    要件 1 と 2 を満たすために、ワーカーのジョブ投入先とスケール方法をどう選びますか。
+  options:
+    - "Event Grid のカスタム トピックにジョブを発行し、ワーカーは HTTP スケール ルールでスケールする"
+    - "Service Bus キューにジョブを入れ、ワーカーは KEDA の azure-servicebus ルール（minReplicas: 0）でスケールする。失敗が続くジョブは DLQ で隔離する"
+    - "Redis pub/sub でジョブを配信し、ワーカーは CPU ルールでスケールする"
+    - "Cosmos DB にジョブを書き、ワーカーは最小レプリカ 1 で常時ポーリングする"
+  answer: B
+  explanation: |
+    「確実に処理」「失敗の隔離」はメッセージング（Service Bus）の要件で、最大配信回数を超えたメッセージは DLQ に入ります。
+    キューの長さでのスケールと 0 までのスケール インは、KEDA の `azure-servicebus` スケーラーと `minReplicas: 0` で実現します。
+    Redis pub/sub は永続化されず、CPU ルールでは 0 にできません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues
+
+- id: x-contoso-semantic-cache
+  case: contoso-support-rag
+  objective: "2.12"
+  type: single
+  difficulty: 2
+  tags: [case-study, redis, semantic-cache]
+  question: |
+    要件 3 を満たすために追加するものとして、最も適切なものはどれですか。
+  options:
+    - "Azure Managed Redis（RediSearch、Enterprise ポリシー）でセマンティック キャッシュを実装する"
+    - "Cosmos DB の整合性レベルを Eventual にする"
+    - "Container Apps の最大レプリカ数を増やす"
+    - "Service Bus の重複検出を有効にする"
+  answer: A
+  explanation: |
+    質問の埋め込みで過去の質問を KNN 検索し、十分に近ければ保存済みの回答を返すのが**セマンティック キャッシュ**です。言い回しが違う同じ意味の質問にも効きます。
+    重複検出は同じ MessageId のメッセージを防ぐ機能で、意味の近さは判定しません。
+  refs:
+    - https://learn.microsoft.com/azure/redis/tutorial-semantic-cache
+
+- id: x-contoso-vector-index
+  case: contoso-support-rag
+  objective: "2.3"
+  type: single
+  difficulty: 2
+  tags: [case-study, cosmos-db, vector]
+  question: |
+    文書を保存する Cosmos DB コンテナーのベクトル インデックスとして、最も適切なものはどれですか。
+  options:
+    - "`flat`"
+    - "`quantizedFlat`"
+    - "`diskANN`"
+    - "ベクトル インデックスは使わず、`excludedPaths` にも含めない"
+  answer: C
+  explanation: |
+    約 800 万チャンク・1536 次元なので、`flat`（505 次元まで）は使えず、総当たりの `quantizedFlat` は 5 万件超では不利です。大規模な近似検索には **diskANN** を使います。
+    埋め込みのパスは通常のインデックスから除外します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: x-contoso-reembed
+  case: contoso-support-rag
+  objective: "2.4"
+  type: single
+  difficulty: 2
+  tags: [case-study, cosmos-db, change-feed]
+  question: |
+    「管理者が文書を更新したら、その文書の埋め込みを再計算する」をサーバーレスで実装します。最も適切な方法はどれですか。
+  options:
+    - "Azure Functions の Cosmos DB トリガー（変更フィード）で更新を検知し、埋め込みを再計算して書き戻す。書き戻しによる再発火を本文のハッシュで防ぐ"
+    - "Timer トリガーで 1 分ごとに全文書を読み、すべての埋め込みを再計算する"
+    - "Event Grid の Blob トリガーで Cosmos DB の更新を検知する"
+    - "管理者に手動で再計算 API を呼んでもらう"
+  answer: A
+  explanation: |
+    Cosmos DB の変更を検知するのは**変更フィード**です。Functions の Cosmos DB トリガーはリース コンテナーで進捗を管理します。
+    埋め込みを同じアイテムに書き戻すと再び変更フィードに流れるため、内容のハッシュを比較して無限ループを防ぎます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-trigger
+
+- id: x-contoso-secrets
+  case: contoso-support-rag
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [case-study, key-vault, container-apps]
+  question: |
+    要件 4 を満たしながら、ワーカーが LLM の API キーを使えるようにします。最も適切な方法はどれですか。
+  options:
+    - "API キーを Container Apps の環境変数に直接設定する"
+    - "API キーを Key Vault に保存し、Container Apps のシークレットをバージョンなしの Key Vault 参照（`keyvaultref:`、マネージド ID）で定義して、環境変数から `secretRef` で参照する"
+    - "API キーをコンテナー イメージに埋め込む"
+    - "API キーを App Configuration の通常のキー値として保存する"
+  answer: B
+  explanation: |
+    シークレットは Key Vault に置き、Container Apps のシークレットを **Key Vault 参照**（マネージド ID + Key Vault Secrets User）にします。
+    バージョンなしの参照なら、ローテーション後 30 分以内に新しい値が取り込まれ、参照しているリビジョンが自動で再起動されます。
+    なお、LLM の呼び出しもマネージド ID（Entra 認証）にできれば、キー自体が不要になります。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/manage-secrets
+
+- id: x-contoso-tracing
+  case: contoso-support-rag
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [case-study, opentelemetry]
+  question: |
+    要件 5 を満たすために必要なことはどれですか。
+  options:
+    - "API とワーカーを OpenTelemetry（Azure Monitor Distro）で計装して同じ Application Insights に送り、それぞれに `service.name` を設定する。コンテキストは HTTP と Service Bus の SDK が自動で伝搬する"
+    - "API とワーカーのログをそれぞれ別のストレージ アカウントに出力する"
+    - "Container Apps のシステム ログだけを有効にする"
+    - "Service Bus のメトリックに対してアラートを設定する"
+  answer: A
+  explanation: |
+    分散トレースは、各サービスの計装と**コンテキスト伝搬**（`traceparent` や Service Bus のメッセージ プロパティ）でつながります。
+    同じ Application Insights に送り、`service.name`（→ cloud_RoleName）を設定すると、アプリケーション マップやエンドツーエンドのトランザクションで追跡できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable
+
+# ---------- Fabrikam エージェントのツール バックエンド ----------
+- id: x-fabrikam-store
+  case: fabrikam-agent-backend
+  objective: "2.6"
+  type: single
+  difficulty: 2
+  tags: [case-study, postgresql, pgvector]
+  question: |
+    要件 1 を満たすために、請求の説明文の埋め込みをどこに保存しますか。
+  options:
+    - "既存の PostgreSQL に pgvector を有効化し、請求テーブル（または関連テーブル）に `vector(1536)` 列を追加する"
+    - "別に Cosmos DB for NoSQL のアカウントを作り、埋め込みだけを保存する"
+    - "Azure Managed Redis に埋め込みだけを保存する"
+    - "埋め込みを `text` 列に JSON 文字列で保存する"
+  answer: A
+  explanation: |
+    契約テーブルとの JOIN や代理店での絞り込みとベクトル検索を**1 つの SQL**で行うなら、同じ PostgreSQL に pgvector で保存するのが最適です。
+    `azure.extensions` に `VECTOR` を追加してから `CREATE EXTENSION vector` します。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-use-pgvector
+
+- id: x-fabrikam-filter
+  case: fabrikam-agent-backend
+  objective: "2.9"
+  type: multiple
+  difficulty: 3
+  tags: [case-study, postgresql, pgvector, filter]
+  question: |
+    要件 2 を満たすための対策として有効なものを **2 つ**選んでください（HNSW インデックスを使用）。
+  options:
+    - "`hnsw.iterative_scan` を有効にする（pgvector 0.8 以降）"
+    - "データ量の多い代理店について、代理店ごとの部分インデックスやパーティショニングを使う"
+    - "`LIMIT` を外して、アプリ側で上位 10 件を選ぶ"
+    - "インデックスを `vector_l2_ops` に作り直し、クエリは `<=>` のままにする"
+  answer: [A, B]
+  explanation: |
+    近似インデックスはフィルターを走査後に適用するため、データが少ない代理店では件数が足りなくなります。
+    **反復インデックス スキャン**で不足分を追加走査するか、**部分インデックス / パーティショニング**で代理店ごとに検索範囲を分けます。
+    `LIMIT` を外すとインデックスが使われず、演算子クラスの不一致はインデックスを無効にします。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: x-fabrikam-connections
+  case: fabrikam-agent-backend
+  objective: "2.10"
+  type: single
+  difficulty: 2
+  tags: [case-study, postgresql, pgbouncer, entra-id]
+  question: |
+    要件 3 と 4 を同時に満たす接続方法として、最も適切なものはどれですか。
+  options:
+    - "組み込み PgBouncer（ポート 6432）に、関数アプリのマネージド ID の Entra トークンをパスワードとして接続し、関数内でも接続を使い回す"
+    - "ポート 5432 に管理者ユーザーとパスワードで接続し、`max_connections` を増やす"
+    - "Burstable 層に変更して PgBouncer を有効にする"
+    - "リクエストごとに新しい接続を作り、処理後すぐに閉じる"
+  answer: A
+  explanation: |
+    組み込み PgBouncer は General Purpose 層で使え、Microsoft Entra 認証にも対応しています。マネージド ID のトークン（スコープ `https://ossrdbms-aad.database.windows.net/.default`）をパスワードとして使い、6432 に接続します。
+    Burstable 層では PgBouncer は使えません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer

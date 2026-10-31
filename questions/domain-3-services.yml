@@ -1,0 +1,352 @@
+# 分野 3: Connect to and consume Azure services (20–25%)
+
+# ---------- 3.1 Service Bus ----------
+- id: s-sb-max-delivery
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, dead-letter]
+  question: |
+    推論ワーカーが Service Bus キューから Peek-Lock でメッセージを受け取り、特定の不正なメッセージで毎回例外を出して abandon しています。
+    キューの設定は既定のままです。このメッセージは最終的にどうなりますか。
+  options:
+    - "無期限にキューの先頭に残り続け、他のメッセージの処理を妨げる"
+    - "配信回数が既定の 10 回を超えると、理由 `MaxDeliveryCountExceeded` で配信不能キューに移される"
+    - "1 回目の失敗で自動的に削除される"
+    - "Event Grid に転送される"
+  answer: B
+  explanation: |
+    Peek-Lock で abandon されるかロックが期限切れになるたびに配信回数が増え、**最大配信回数（既定 10）**を超えると配信不能キュー（DLQ）に移ります。
+    DLQ のメッセージは自動では削除されないので、監視して原因を直し、再送または削除します。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-dead-letter-queues
+
+- id: s-sb-default-rule
+  objective: "3.1"
+  type: single
+  difficulty: 2
+  tags: [service-bus, topic, filter]
+  question: |
+    トピック `events` にサブスクリプション `high-priority` を作り、SQL フィルター `priority > 5` のルールを追加しました。しかし、すべてのメッセージが届きます。原因と対処はどれですか。
+  options:
+    - "SQL フィルターは Standard 層では使えない。Premium にする"
+    - "既定の `$Default` ルール（True フィルター）が残っている。`$Default` を削除する"
+    - "メッセージに `session_id` がない。セッションを有効にする"
+    - "重複検出が無効になっている。有効にする"
+  answer: B
+  explanation: |
+    新しいサブスクリプションには全件を通す `$Default` ルールがあります。アクションのないルールは OR で評価されるため、`$Default` が残っていると全件届きます。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/topic-filters
+
+- id: s-sb-feature-match
+  objective: "3.1"
+  type: match
+  difficulty: 2
+  tags: [service-bus]
+  question: |
+    要件と、それを満たす Service Bus の機能を対応付けてください。
+  pairs:
+    - left: "同じ会話 ID のメッセージを順番どおり、同じ受信者に処理させたい"
+      right: "セッション（SessionId）"
+    - left: "クライアントの再送で同じジョブが二重に登録されるのを防ぎたい"
+      right: "重複検出（MessageId）"
+    - left: "メッセージを 1 時間後まで見えないようにしたい"
+      right: "スケジュールされたメッセージ（ScheduledEnqueueTime）"
+    - left: "メッセージの受信と、結果メッセージの送信を原子的に行いたい"
+      right: "トランザクション"
+  distractors:
+    - "自動転送"
+  explanation: |
+    - セッション: 同じ SessionId のメッセージを順序どおり 1 つの受信者に。
+    - 重複検出: 期間内（既定 10 分）に同じ MessageId が来たら破棄。
+    - スケジュール: 指定時刻まで配信しない。
+    - トランザクション: 複数の操作をまとめて原子的に（最大 100 メッセージ）。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/advanced-features-overview
+
+- id: s-sb-facts
+  objective: "3.1"
+  type: yesno
+  difficulty: 2
+  tags: [service-bus]
+  question: |
+    Azure Service Bus について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "Basic 層ではトピックとサブスクリプションを使える。"
+      answer: false
+    - text: "Peek-Lock のロック期間の最大値は 5 分で、それより長い処理ではロックを更新する。"
+      answer: true
+    - text: "配信不能キューのメッセージは、TTL が過ぎると自動で削除される。"
+      answer: false
+    - text: "Standard 層の最大メッセージ サイズは 256 KB である。"
+      answer: true
+  explanation: |
+    Basic 層はキューのみです。ロック期間は既定 1 分・最大 5 分です。DLQ のメッセージは自動では削除されず、TTL も適用されません。
+    メッセージ サイズは Basic / Standard が 256 KB、Premium は最大 100 MB です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/service-bus-quotas
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+
+- id: s-sb-dlq-code
+  objective: "3.1"
+  type: dropdown
+  difficulty: 2
+  tags: [service-bus, python, dead-letter]
+  question: |
+    Python SDK で、処理できない不正なメッセージを理由付きで配信不能キューに移し、一時的なエラーは再配信させるコードを完成させてください。
+  language: python
+  template: |
+    with client.get_queue_receiver("inference") as receiver:
+        for msg in receiver:
+            try:
+                process(msg)
+                receiver.{{1}}(msg)
+            except ValueError as e:
+                receiver.{{2}}(msg, reason="InvalidPayload", error_description=str(e))
+            except TransientError:
+                receiver.{{3}}(msg)
+  blanks:
+    "1": {options: [complete_message, abandon_message, defer_message], answer: complete_message}
+    "2": {options: [dead_letter_message, abandon_message, complete_message], answer: dead_letter_message}
+    "3": {options: [abandon_message, dead_letter_message, complete_message], answer: abandon_message}
+  explanation: |
+    成功したら `complete_message`（削除）、不正なメッセージは `dead_letter_message`（理由と説明を付けて DLQ へ）、一時的な失敗は `abandon_message`（ロックを解除して再配信、配信回数 +1）です。
+    `defer_message` は後で sequence number を指定して受信するための保留です。
+  refs:
+    - https://learn.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement
+
+# ---------- 3.2 Event Grid ----------
+- id: s-eg-ttl-deadletter
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, retry, dead-letter]
+  question: |
+    Event Grid の Webhook ハンドラーが 2 日間停止していました。イベント サブスクリプションは既定の設定のままです。停止中に発生したイベントはどうなりましたか。
+  options:
+    - "すべて保持されていて、復旧後に順番に配信される"
+    - "既定の TTL（24 時間）を過ぎたものは破棄された。配信不能は既定で無効のため保存されていない"
+    - "自動的にストレージ アカウントの配信不能コンテナーに保存されている"
+    - "Service Bus に自動転送されている"
+  answer: B
+  explanation: |
+    再試行は最大 30 回・TTL 1440 分（24 時間）が既定で、どちらか先に達すると終了します。**配信不能は既定で無効**なので、そのイベントは破棄されます。
+    失いたくない場合は、ストレージ アカウントの Blob コンテナーを配信不能の保存先に設定します。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: s-eg-retry-facts
+  objective: "3.2"
+  type: yesno
+  difficulty: 2
+  tags: [event-grid, retry]
+  question: |
+    Event Grid の配信と再試行について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "Webhook が HTTP 400 を返した場合、Event Grid は指数バックオフで再試行する。"
+      answer: false
+    - text: "最大配信試行回数の既定値は 30 である。"
+      answer: true
+    - text: "Event Grid は少なくとも 1 回の配信を行うため、ハンドラーは重複を考慮して冪等にすべきである。"
+      answer: true
+    - text: "既定では、イベントは 1 件ずつ（1 件の配列として）配信される。"
+      answer: true
+  explanation: |
+    400（Bad Request）や 413 は再試行しても成功しないため、再試行されません（配信不能が設定されていればすぐに配信不能へ）。Webhook では 401 / 403 も同様です。
+    バッチ配信はサブスクリプションごとに有効化します。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/delivery-and-retry
+
+- id: s-eg-filter-match
+  objective: "3.2"
+  type: match
+  difficulty: 2
+  tags: [event-grid, filter]
+  question: |
+    要件を満たす Event Grid のフィルターを対応付けてください。
+  pairs:
+    - left: "Blob の作成イベントだけを受け取りたい"
+      right: "イベントの種類（includedEventTypes: Microsoft.Storage.BlobCreated）"
+    - left: "拡張子が .pdf のファイルだけを受け取りたい"
+      right: "件名のフィルター（subjectEndsWith: .pdf）"
+    - left: "カスタム イベントの data.category が manual か faq のものだけを受け取りたい"
+      right: "高度なフィルター（StringIn: data.category）"
+  distractors:
+    - "Service Bus の相関フィルター"
+  explanation: |
+    Event Grid のフィルターは、**イベントの種類**、**件名（subjectBeginsWith / subjectEndsWith）**、データのフィールドに演算子を使う**高度なフィルター**の 3 種類です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/event-filtering
+
+- id: s-eg-custom-publish
+  objective: "3.2"
+  type: single
+  difficulty: 2
+  tags: [event-grid, custom-events, rbac]
+  question: |
+    アプリから Event Grid のカスタム トピックに CloudEvents を発行します。アクセス キーを使わず、マネージド ID で発行するには、ID にどのロールを割り当てますか。
+  options:
+    - "EventGrid Data Sender"
+    - "EventGrid Contributor"
+    - "Azure Service Bus Data Sender"
+    - "Reader"
+  answer: A
+  explanation: |
+    カスタム トピックへのイベント発行には、データ プレーンのロール **EventGrid Data Sender** を使います。SDK では `EventGridPublisherClient(endpoint, DefaultAzureCredential())` で `CloudEvent` を送ります。
+    EventGrid Contributor はリソースの管理用です。
+  refs:
+    - https://learn.microsoft.com/azure/event-grid/authenticate-with-microsoft-entra-id
+
+# ---------- 3.3 Functions のトリガーとバインド ----------
+- id: s-func-timer-cron
+  objective: "3.3"
+  type: single
+  difficulty: 1
+  tags: [functions, timer]
+  question: |
+    Azure Functions の Timer トリガーで、毎日 02:30（UTC）に実行したいと考えています。正しい式はどれですか。
+  options:
+    - "`30 2 * * *`"
+    - "`0 30 2 * * *`"
+    - "`0 2 30 * * *`"
+    - "`2:30 * * *`"
+  answer: B
+  explanation: |
+    Timer トリガーは **NCRONTAB の 6 フィールド**（`{秒} {分} {時} {日} {月} {曜日}`）です。02:30:00 は `0 30 2 * * *` です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-timer
+
+- id: s-func-python-bindings
+  objective: "3.3"
+  type: dropdown
+  difficulty: 2
+  tags: [functions, python, bindings]
+  question: |
+    Python v2 プログラミング モデルで、Service Bus キューのメッセージをトリガーに処理し、結果を Cosmos DB に書き込む関数を完成させてください。
+  language: python
+  template: |
+    app = func.FunctionApp()
+
+    @app.{{1}}(arg_name="msg", queue_name="inference",
+                                   connection="ServiceBusConnection")
+    @app.{{2}}(arg_name="doc", database_name="ragdb",
+                          container_name="results", connection="CosmosConnection")
+    def worker(msg: func.ServiceBusMessage, doc: func.Out[func.Document]):
+        result = run_llm(msg.get_body())
+        doc.{{3}}(func.Document.from_dict({"id": msg.message_id, "summary": result}))
+  blanks:
+    "1": {options: [service_bus_queue_trigger, service_bus_queue_output, queue_trigger], answer: service_bus_queue_trigger}
+    "2": {options: [cosmos_db_output, cosmos_db_input, cosmos_db_trigger], answer: cosmos_db_output}
+    "3": {options: [set, get, append], answer: set}
+  explanation: |
+    v2 モデルではデコレーターでトリガー（1 関数に 1 つ）と入出力バインドを定義します。出力バインドの値は `func.Out[...]` の `set()` で設定します。
+    `connection` には接続文字列そのものではなく、**アプリ設定の名前**を書きます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference-python
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-output
+
+- id: s-func-http-long
+  objective: "3.3"
+  type: single
+  difficulty: 2
+  tags: [functions, http, durable]
+  question: |
+    HTTP トリガーで、LLM による 5〜10 分かかる要約処理を受け付けたいと考えています。Flex Consumption プランのタイムアウトは 30 分にしています。最も適切な設計はどれですか。
+  options:
+    - "HTTP トリガーの中で処理を完了させ、結果を返す"
+    - "Durable Functions の非同期 HTTP API パターン（202 と状態確認 URL を返す）、またはキューに入れて 202 を返し、別の関数で処理する"
+    - "`functionTimeout` を 60 分に延ばす"
+    - "Premium プランに変える"
+  answer: B
+  explanation: |
+    HTTP トリガーは、プランや `functionTimeout` にかかわらず、ロード バランサーのアイドル タイムアウトにより**約 230 秒**で応答しないとタイムアウトします。
+    長い処理は非同期化します（Durable Functions の非同期 HTTP API、または Service Bus などのキュー）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-scale
+    - https://learn.microsoft.com/azure/azure-functions/durable/durable-functions-overview
+
+- id: s-func-identity-connection
+  objective: "3.3"
+  type: single
+  difficulty: 3
+  tags: [functions, managed-identity, service-bus]
+  question: |
+    Service Bus トリガーの関数（`connection="ServiceBusConnection"`）で、接続文字列を使わずにマネージド ID で接続したいと考えています。必要なアプリ設定はどれですか（ロールは割り当て済み）。
+  options:
+    - "`ServiceBusConnection` = `Endpoint=sb://...;SharedAccessKey=...`"
+    - "`ServiceBusConnection__fullyQualifiedNamespace` = `sb-ai200.servicebus.windows.net`"
+    - "`ServiceBusConnection__accountName` = `sb-ai200`"
+    - "`AzureWebJobsServiceBus` = `ManagedIdentity`"
+  answer: B
+  explanation: |
+    ID ベースの接続では、`<接続名>__fullyQualifiedNamespace` に名前空間の FQDN を設定します（Cosmos DB は `__accountEndpoint`、Storage は `__accountName` / `__serviceUri`）。
+    関数アプリのマネージド ID に Azure Service Bus Data Receiver（出力するなら Data Sender）を割り当てます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-reference#configure-an-identity-based-connection
+
+# ---------- 3.4 構成とデプロイ ----------
+- id: s-func-plan-new
+  objective: "3.4"
+  type: single
+  difficulty: 2
+  tags: [functions, hosting]
+  question: |
+    新しいサーバーレスの関数アプリ（Python、コードのみ）を作ります。VNet 内の PostgreSQL に接続し、コールド スタートを抑えたいと考えています。最も適したホスティング プランはどれですか。
+  options:
+    - "Consumption プラン（レガシー）"
+    - "Flex Consumption プラン（VNet 統合、常時準備インスタンス）"
+    - "Dedicated（App Service）プランで Always On を無効にする"
+    - "Container Apps（最小レプリカ 0）"
+  answer: B
+  explanation: |
+    **Flex Consumption** は新規のサーバーレス アプリの推奨プランで、VNet 統合、関数ごとのスケール、**常時準備インスタンス**によるコールド スタート対策があります（Linux のみ、コンテナー不可）。
+    Linux の従来の Consumption プランは廃止されています。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-scale
+    - https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan
+
+- id: s-func-plan-match
+  objective: "3.4"
+  type: match
+  difficulty: 2
+  tags: [functions, hosting]
+  question: |
+    要件に合う Azure Functions のホスティングを対応付けてください。
+  pairs:
+    - left: "カスタム Linux コンテナーで動かし、事前ウォーム済みインスタンスでコールド スタートをなくしたい"
+      right: "Premium プラン"
+    - left: "既存の App Service プランの余剰リソースで動かしたい"
+      right: "Dedicated プラン（Always On）"
+    - left: "ほかのマイクロサービスと同じ環境で、KEDA によってスケールさせたい"
+      right: "Container Apps"
+    - left: "コードのみの新しいサーバーレス アプリで、VNet 統合と高速なスケールが必要"
+      right: "Flex Consumption プラン"
+  explanation: |
+    Flex Consumption はコンテナーに対応しないため、コンテナーなら Premium / Dedicated / Container Apps を選びます。
+    Dedicated で HTTP 以外のトリガーを使う場合は Always On が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-scale
+
+- id: s-func-config-facts
+  objective: "3.4"
+  type: yesno
+  difficulty: 2
+  tags: [functions, configuration, deployment]
+  question: |
+    関数アプリの構成とデプロイについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`local.settings.json` の値はデプロイ時に Azure のアプリ設定へ自動でアップロードされる。"
+      answer: false
+    - text: "`host.json` はデプロイされ、拡張機能の設定（Service Bus の同時実行数など）に使われる。"
+      answer: true
+    - text: "Flex Consumption プランはカスタム コンテナーのデプロイに対応している。"
+      answer: false
+    - text: "レガシーの Consumption プランの関数タイムアウトは、既定 5 分・最大 10 分である。"
+      answer: true
+  explanation: |
+    `local.settings.json` はローカル実行専用で、デプロイされません（Azure ではアプリ設定に入れる）。`host.json` はランタイム全体の設定でデプロイされます。
+    Flex Consumption はコードのみ（Linux）です。タイムアウトは Flex / Premium / Dedicated / Container Apps が既定 30 分・最大無制限、レガシー Consumption は 5 分 / 10 分です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-scale
+    - https://learn.microsoft.com/azure/azure-functions/functions-host-json

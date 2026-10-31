@@ -1,0 +1,852 @@
+# 分野 2: Develop AI solutions by using Azure data management services (25–30%)
+
+# ---------- 2.1 Cosmos DB SDK とクエリ ----------
+- id: d-cosmos-point-read
+  objective: "2.1"
+  type: single
+  difficulty: 1
+  tags: [cosmos-db, ru]
+  question: |
+    Cosmos DB for NoSQL のコンテナー（パーティション キー `/tenantId`）から、`id` が `doc1-chunk3`、テナントが `contoso` の 1 KB のアイテムを取得します。
+    RU の消費が最も少ない方法はどれですか。
+  options:
+    - "`SELECT * FROM c WHERE c.id = 'doc1-chunk3'` をクロスパーティション クエリで実行する"
+    - "`container.read_item(item='doc1-chunk3', partition_key='contoso')` でポイント読み取りする"
+    - "`SELECT * FROM c` で全件取得し、アプリ側で絞り込む"
+    - "変更フィードを最初から読み、該当アイテムを探す"
+  answer: B
+  explanation: |
+    `id` とパーティション キーを指定する**ポイント読み取り**が最も安く、1 KB のアイテムで約 **1 RU** です。
+    同じアイテムでもクエリにするとクエリ エンジンのコストがかかり、パーティション キーがなければ全パーティションに広がります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/request-units
+
+- id: d-cosmos-sdk-practices
+  objective: "2.1"
+  type: multiple
+  difficulty: 1
+  tags: [cosmos-db, sdk]
+  question: |
+    Python の Web API から Cosmos DB for NoSQL にアクセスします。SDK の使い方として推奨されるものを **2 つ**選んでください。
+  options:
+    - "`CosmosClient` をアプリ全体で 1 つ作って使い回す（シングルトン）"
+    - "ユーザー入力は `@name` 形式のパラメーター化クエリで渡す"
+    - "リクエストごとに `CosmosClient` を作成し、終わったら破棄する"
+    - "クエリ文字列にユーザー入力を文字列連結で埋め込む"
+    - "常に `enable_cross_partition_query=True` を付け、パーティション キーは指定しない"
+  answer: [A, B]
+  explanation: |
+    `CosmosClient` は接続やメタデータのキャッシュを保持するため、**シングルトン**で使い回します。
+    クエリは**パラメーター化**して、インジェクションを防ぎクエリ プランを再利用します。可能な限りパーティション キーを指定して、クロスパーティション クエリを避けます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/best-practice-python
+    - https://learn.microsoft.com/cosmos-db/query/parameterized-queries
+
+- id: d-cosmos-rbac-container
+  objective: "2.1"
+  type: single
+  difficulty: 3
+  tags: [cosmos-db, rbac, entra-id]
+  question: |
+    アプリのマネージド ID に Cosmos DB のデータ プレーン ロール **Cosmos DB Built-in Data Contributor** を割り当て、`DefaultAzureCredential` で接続しています。
+    アイテムの読み書きは成功しますが、起動時の `create_container_if_not_exists()` が権限エラーになります。最も適切な対処はどれですか。
+  options:
+    - "データ プレーン ロールを Built-in Data Reader に変更する"
+    - "コンテナーの作成は Azure CLI / Bicep などの管理（コントロール プレーン）操作で行い、アプリはデータ操作だけにする"
+    - "`CosmosClient` を Gateway モードに変更する"
+    - "整合性レベルを Strong に変更する"
+  answer: B
+  explanation: |
+    Cosmos DB のデータ プレーン RBAC（Built-in Data Contributor / Reader）は、アイテムの読み書きやクエリなどの**データ操作**用で、データベースやコンテナーの作成などの**管理操作**は含みません。
+    管理操作は Azure RBAC（コントロール プレーン）の権限で、IaC や CLI から行います。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/security/how-to-grant-data-plane-role-based-access
+
+# ---------- 2.2 インデックスと整合性 ----------
+- id: d-cosmos-composite-index
+  objective: "2.2"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, indexing]
+  question: |
+    次のクエリが失敗します（または非常に高コストです）。インデックス作成ポリシーは既定のままです。何を追加すべきですか。
+
+    ```sql
+    SELECT * FROM c WHERE c.tenantId = @t ORDER BY c.category ASC, c.updatedAt DESC
+    ```
+  options:
+    - "`category` と `updatedAt` の範囲インデックスを個別に追加する"
+    - "`category ASC, updatedAt DESC` の複合インデックスを追加する"
+    - "空間インデックスを追加する"
+    - "`indexingMode` を `none` にする"
+  answer: B
+  explanation: |
+    **複数のプロパティで `ORDER BY`** する場合は、順序（ASC / DESC）まで一致した**複合インデックス**が必要です。
+    既定の範囲インデックスは単一プロパティの並べ替えや範囲検索に使われます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/index-policy
+
+- id: d-cosmos-exclude-paths
+  objective: "2.2"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, indexing, ru]
+  question: |
+    RAG 用のコンテナーで、アイテムに 3072 次元の埋め込み（`/embedding`）と長い本文（`/content`）があります。インデックス作成ポリシーは既定のまま（`/*` をすべてインデックス）です。
+    書き込みの RU が想定より大幅に高くなっています。最も効果的な対処はどれですか。
+  options:
+    - "整合性レベルを Eventual に変更する"
+    - "`/embedding/*` やクエリで使わない `/content/?` を `excludedPaths` に追加し、ベクトルはベクトル インデックスで扱う"
+    - "パーティション キーを `/id` に変更する"
+    - "自動スケールの最大 RU/s を下げる"
+  answer: B
+  explanation: |
+    既定ではすべてのプロパティがインデックスされるため、大きな配列や長い文字列の書き込みのたびにインデックス更新の RU がかかります。
+    クエリに使わないパスを**除外**すると書き込み RU とストレージが下がります。埋め込みのパスは通常のインデックスから除外し、`vectorIndexes` で索引付けします。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/index-policy
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-consistency-match
+  objective: "2.2"
+  type: match
+  difficulty: 2
+  tags: [cosmos-db, consistency]
+  question: |
+    要件に最も適した Cosmos DB の整合性レベルを対応付けてください（コストはなるべく低くしたい）。
+  pairs:
+    - left: "チャットで、ユーザーが送ったメッセージを直後に本人の画面で確実に読めればよい"
+      right: "Session"
+    - left: "単一書き込みリージョンで、常に最新のコミット済みデータを読む必要がある"
+      right: "Strong"
+    - left: "閲覧数の表示。順序も鮮度も保証不要で、最も安く読みたい"
+      right: "Eventual"
+    - left: "遅れはあってよいが、書き込まれた順序どおりに見えなければならない"
+      right: "Consistent prefix"
+  distractors:
+    - "Bounded staleness"
+  explanation: |
+    - **Session**（既定）: 同じセッション内で read-your-writes を保証。読み取りコストは 1 倍。
+    - **Strong**: 常に最新。読み取り RU は 2 倍。複数リージョン書き込みでは使えない。
+    - **Eventual**: 順序も保証しない最安のレベル。
+    - **Consistent prefix**: 順序は保証、遅れはありうる。
+    - Bounded staleness は遅れの上限（K バージョン / T 秒）を保証し、読み取り RU は 2 倍。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/consistency-levels
+
+- id: d-cosmos-consistency-facts
+  objective: "2.2"
+  type: yesno
+  difficulty: 2
+  tags: [cosmos-db, consistency]
+  question: |
+    Cosmos DB の整合性レベルについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "アカウントの既定の整合性レベルは Session である。"
+      answer: true
+    - text: "Strong と Bounded staleness は、他のレベルに比べて読み取りの RU が約 2 倍になる。"
+      answer: true
+    - text: "リクエスト単位で、アカウントの既定より強い整合性レベルを指定できる。"
+      answer: false
+  explanation: |
+    リクエスト単位では、アカウントの既定より**弱める**ことはできますが、**強める**ことはできません。
+    Strong と Bounded staleness はクォーラム読み取りのため、読み取りコストが約 2 倍です。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/consistency-levels
+
+# ---------- 2.3 ベクトル検索 ----------
+- id: d-cosmos-vector-index-type
+  objective: "2.3"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, vector]
+  question: |
+    1536 次元の埋め込みを約 1,000 万件保存し、低遅延・低 RU で上位 10 件の類似検索を行いたいと考えています。
+    Cosmos DB for NoSQL のベクトル インデックスの種類として最も適切なものはどれですか。
+  options:
+    - "`flat`"
+    - "`quantizedFlat`"
+    - "`diskANN`"
+    - "ベクトル インデックスは作らず、範囲インデックスで十分"
+  answer: C
+  explanation: |
+    `flat` は総当たりで**最大 505 次元**のため 1536 次元には使えません。`quantizedFlat` も総当たり（量子化済み）で、検索対象が約 5 万件以下の場合に推奨されます。
+    大規模では **DiskANN**（近似最近傍）が最も低遅延・低 RU です。最大次元は quantizedFlat / diskANN とも 4,096 です。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-vector-policy
+  objective: "2.3"
+  type: dropdown
+  difficulty: 2
+  tags: [cosmos-db, vector, json]
+  question: |
+    `text-embedding-3-small`（1536 次元、コサイン類似度）の埋め込みを `/embedding` に保存するコンテナーのポリシーを完成させてください。
+  language: json
+  template: |
+    // コンテナーのベクトル埋め込みポリシー
+    {
+      "vectorEmbeddings": [{
+        "path": "/embedding",
+        "dataType": "{{1}}",
+        "distanceFunction": "{{2}}",
+        "dimensions": {{3}}
+      }]
+    }
+    // インデックス作成ポリシー（抜粋）
+    {
+      "excludedPaths": [{ "path": "{{4}}" }],
+      "vectorIndexes": [{ "path": "/embedding", "type": "diskANN" }]
+    }
+  blanks:
+    "1": {options: [float32, string, double], answer: float32}
+    "2": {options: [cosine, hamming, jaccard], answer: cosine}
+    "3": {options: ["1536", "3072", "505"], answer: "1536"}
+    "4": {options: ["/embedding/*", "/*", "/id/?"], answer: "/embedding/*"}
+  explanation: |
+    ベクトル埋め込みポリシーは `path` / `dataType`（float32 既定、float16、int8、uint8）/ `distanceFunction`（cosine 既定、dotproduct、euclidean）/ `dimensions` を指定します。
+    埋め込みのパスは通常のインデックスから除外し（`/embedding/*`）、`vectorIndexes` で索引付けします。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-vector-query
+  objective: "2.3"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, vector, query]
+  question: |
+    テナント `contoso` の `manual` カテゴリの中から、質問の埋め込み `@q` に最も近い 5 件を取得したいと考えています。最も適切なクエリはどれですか。
+  options:
+    - "`SELECT c.id, VectorDistance(c.embedding, @q) AS score FROM c WHERE c.category = 'manual' ORDER BY VectorDistance(c.embedding, @q)`"
+    - "`SELECT TOP 5 c.id, VectorDistance(c.embedding, @q) AS score FROM c WHERE c.tenantId = 'contoso' AND c.category = 'manual' ORDER BY VectorDistance(c.embedding, @q)`"
+    - "`SELECT TOP 5 c.id FROM c WHERE VectorDistance(c.embedding, @q) > 0.8 ORDER BY c.updatedAt DESC`"
+    - "`SELECT TOP 5 c.id FROM c ORDER BY c.embedding DESC`"
+  answer: B
+  explanation: |
+    ベクトル検索では **`TOP n` を必ず指定**し、`ORDER BY VectorDistance(...)` で似ている順に並べます。`TOP` がないと多くの結果を評価して RU と遅延が増えます。
+    `WHERE` のフィルター（パーティション キーを含む）と組み合わせると、検索範囲が絞られて RU が下がります。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+- id: d-cosmos-vector-limits
+  objective: "2.3"
+  type: yesno
+  difficulty: 3
+  tags: [cosmos-db, vector, limits]
+  question: |
+    Cosmos DB for NoSQL のベクトル検索について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "データベース単位の共有スループットを使うアカウントでも、ベクトルのインデックス作成と検索を利用できる。"
+      answer: false
+    - text: "`quantizedFlat` と `diskANN` は、1,000 件未満のベクトルしかない場合は全件スキャンになる。"
+      answer: true
+    - text: "既存のベクトル埋め込みポリシーの設定を変えるには、いったん削除してから新しい設定で追加し直す。"
+      answer: true
+    - text: "`dataType` に `float16` を指定すると、ストレージを約 50% 減らせる（精度は少し下がる）。"
+      answer: true
+  explanation: |
+    共有スループットのアカウントではベクトル検索はサポートされていません。量子化を使うインデックスは 1,000 件以上で有効になります。
+    ポリシーの設定は直接変更できず、削除して再追加します。`float16` はストレージを約半分にします。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/vector-search
+
+# ---------- 2.4 変更フィード ----------
+- id: d-cosmos-cf-facts
+  objective: "2.4"
+  type: yesno
+  difficulty: 2
+  tags: [cosmos-db, change-feed]
+  question: |
+    Cosmos DB の変更フィード（最新バージョン モード）と変更フィード プロセッサについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "アイテムの削除も変更フィードに流れる。"
+      answer: false
+    - text: "同じ論理パーティション内の変更は、発生した順序で配信される。"
+      answer: true
+    - text: "処理が追いつかない場合、同じプロセッサ名・異なるインスタンス名でプロセッサを追加起動すると、リースが自動で分配される。"
+      answer: true
+    - text: "変更は少なくとも 1 回配信されるため、処理は冪等にすべきである。"
+      answer: true
+  explanation: |
+    最新バージョン モードでは**削除は流れません**（論理削除フラグ＋TTL で対応するか、全バージョンと削除モードを使う）。
+    順序は論理パーティション内で保証されます。プロセッサはリース コンテナーで進捗を管理し、インスタンスを増やすと並列化されます。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/change-feed
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-components
+  objective: "2.4"
+  type: multiple
+  difficulty: 2
+  tags: [cosmos-db, change-feed]
+  question: |
+    .NET SDK で変更フィード プロセッサを構成します。`GetChangeFeedProcessorBuilder<T>()` から `Build()` までに指定が**必要なもの**を **3 つ**選んでください。
+  options:
+    - "プロセッサ名と、変更を処理するデリゲート"
+    - "リース コンテナー（`WithLeaseContainer`）"
+    - "インスタンス名（`WithInstanceName`）"
+    - "整合性レベル（`WithConsistencyLevel`）"
+    - "ベクトル インデックスの種類"
+  answer: [A, B, C]
+  explanation: |
+    変更フィード プロセッサは、監視対象コンテナー、**プロセッサ名**と**デリゲート**、進捗を保存する**リース コンテナー**、各ホストを区別する**インスタンス名**で構成します。
+  refs:
+    - https://learn.microsoft.com/azure/cosmos-db/nosql/change-feed-processor
+
+- id: d-cosmos-cf-function
+  objective: "2.4"
+  type: single
+  difficulty: 2
+  tags: [cosmos-db, change-feed, functions]
+  question: |
+    製品マニュアルのアイテムが追加・更新されたら、サーバーレスで埋め込みを再計算したいと考えています。
+    Azure Functions の Cosmos DB トリガーを使う場合、トリガーの動作に必要なものはどれですか。
+  options:
+    - "Service Bus キュー"
+    - "リース コンテナー（`leases` など。`create_lease_container_if_not_exists` で自動作成も可）"
+    - "Event Grid のシステム トピック"
+    - "ベクトル インデックス"
+  answer: B
+  explanation: |
+    Cosmos DB トリガーは内部で変更フィード プロセッサを使い、処理の進捗を**リース コンテナー**に保存します。
+    埋め込みの書き戻しで再びトリガーが発火しないよう、本文のハッシュを比較するなどの工夫も必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/functions-bindings-cosmosdb-v2-trigger
+
+# ---------- 2.5 PostgreSQL 接続とクエリ ----------
+- id: d-pg-entra-token
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, entra-id]
+  question: |
+    Container Apps のマネージド ID で Azure Database for PostgreSQL（フレキシブル サーバー）にパスワードなしで接続したいと考えています。
+    psycopg の接続で、パスワードの代わりに何を渡しますか。
+  options:
+    - "`DefaultAzureCredential().get_token(\"https://ossrdbms-aad.database.windows.net/.default\").token` で取得したアクセス トークン"
+    - "Key Vault に保存した管理者パスワード"
+    - "マネージド ID のクライアント ID"
+    - "`https://management.azure.com/.default` のトークン"
+  answer: A
+  explanation: |
+    Microsoft Entra 認証では、スコープ `https://ossrdbms-aad.database.windows.net/.default` のアクセス トークンを**パスワードとして**渡します。ユーザー名は Entra のプリンシパル名です。
+    トークンは約 1 時間で期限切れになるので、接続を作るたびに取得し直します（プールの接続作成時など）。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/security/security-entra-concepts
+
+- id: d-pg-extension-allowlist
+  objective: "2.5"
+  type: order
+  difficulty: 2
+  tags: [postgresql, pgvector]
+  question: |
+    新しいフレキシブル サーバーで pgvector を使えるようにし、ベクトル検索用のテーブルを準備します。正しい順序に並べてください。
+  items:
+    - "サーバー パラメーター `azure.extensions` に `VECTOR` を追加する"
+    - "対象のデータベースに接続し、`CREATE EXTENSION vector;` を実行する"
+    - "`embedding vector(1536)` 列を持つテーブルを作成し、データを投入する"
+    - "`CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)` でインデックスを作成する"
+  distractors:
+    - "サーバーを Burstable 層に変更する"
+  explanation: |
+    Azure Database for PostgreSQL では、拡張機能を**許可リスト（`azure.extensions`）に追加してから** `CREATE EXTENSION` します（データベースごと）。
+    その後、`vector(n)` 列を持つテーブルを作り、インデックスを作成します（HNSW は空のテーブルにも作れますが、IVFFlat はデータ投入後に作ります）。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-use-pgvector
+
+- id: d-pg-parameterized
+  objective: "2.5"
+  type: single
+  difficulty: 1
+  tags: [postgresql, python, security]
+  question: |
+    psycopg でユーザーが入力したテナント ID を使って検索します。SQL インジェクションを防ぐ書き方はどれですか。
+  options:
+    - "`conn.execute(f\"SELECT * FROM chunks WHERE tenant_id = '{tenant}'\")`"
+    - "`conn.execute(\"SELECT * FROM chunks WHERE tenant_id = %s\", (tenant,))`"
+    - "`conn.execute(\"SELECT * FROM chunks WHERE tenant_id = '\" + tenant + \"'\")`"
+    - "入力値から `'` を取り除いてから文字列連結する"
+  answer: B
+  explanation: |
+    psycopg ではプレースホルダー（`%s` や `%(name)s`）とパラメーターを分けて渡します。文字列連結や f 文字列は SQL インジェクションの原因になります。
+  refs:
+    - https://www.psycopg.org/psycopg3/docs/basic/params.html
+
+# ---------- 2.6 スキーマとデータ型 ----------
+- id: d-pg-halfvec
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, data-type]
+  question: |
+    `text-embedding-3-large`（3072 次元）の埋め込みを PostgreSQL に保存し、HNSW インデックスで検索したいと考えています。
+    `vector(3072)` 列に HNSW インデックスを作ろうとするとエラーになりました。最も適切な対処はどれですか。
+  options:
+    - "`halfvec` 型で保存する（または `halfvec` にキャストした式インデックスを作る）"
+    - "`jsonb` 型で保存して GIN インデックスを作る"
+    - "`text` 型で保存して B-tree インデックスを作る"
+    - "IVFFlat に変える（IVFFlat は次元の上限がない）"
+  answer: A
+  explanation: |
+    pgvector のインデックスは `vector` 型で **2,000 次元**まで、`halfvec`（半精度）で **4,000 次元**までです（IVFFlat も同じ上限）。
+    3072 次元を索引化するには `halfvec` を使うか、埋め込みモデルの `dimensions` で次元を減らします。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-schema-practices
+  objective: "2.6"
+  type: multiple
+  difficulty: 2
+  tags: [postgresql, schema]
+  question: |
+    RAG 用のスキーマを設計しています。設計として適切なものを **2 つ**選んでください。
+  options:
+    - "文書（documents）とチャンク（chunks）を別テーブルにし、chunks に `document_id` の外部キーを持たせる"
+    - "テナント ID や文書種別など、よく絞り込む属性は通常の列にして B-tree インデックスを張る"
+    - "埋め込みを JSON 文字列として `text` 列に保存する"
+    - "すべての属性を 1 つの `jsonb` 列に入れ、列は作らない"
+  answer: [A, B]
+  explanation: |
+    文書とチャンクを分けると、文書単位の更新・削除（`ON DELETE CASCADE`）が簡単です。
+    頻繁に絞り込む属性は正規の列にすると、B-tree インデックスで高速に絞り込めます。埋め込みは `vector` / `halfvec` 型で保存します。柔軟なメタデータだけを `jsonb` にします。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-use-pgvector
+
+- id: d-pg-type-match
+  objective: "2.6"
+  type: match
+  difficulty: 1
+  tags: [postgresql, data-type]
+  question: |
+    保存するデータと、PostgreSQL で最も適したデータ型を対応付けてください。
+  pairs:
+    - left: "1536 次元の埋め込み"
+      right: "vector(1536)"
+    - left: "項目が文書ごとに異なる柔軟なメタデータ（GIN で検索）"
+      right: "jsonb"
+    - left: "キーワード検索用に前処理した本文"
+      right: "tsvector"
+    - left: "更新日時（タイムゾーン付き）"
+      right: "timestamptz"
+  distractors:
+    - "bytea"
+  explanation: |
+    埋め込みは pgvector の `vector`、柔軟なメタデータは `jsonb`（GIN インデックス）、全文検索は `tsvector`（GIN インデックス）、日時は `timestamptz` が適しています。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://www.postgresql.org/docs/current/datatype.html
+
+# ---------- 2.7 インデックス戦略 ----------
+- id: d-pg-opclass
+  objective: "2.7"
+  type: single
+  difficulty: 2
+  tags: [postgresql, pgvector, index]
+  question: |
+    次のクエリが遅く、`EXPLAIN` を見ると Seq Scan になっています。インデックスは `CREATE INDEX ON chunks USING hnsw (embedding vector_l2_ops);` で作成済みです。原因は何ですか。
+
+    ```sql
+    SELECT id FROM chunks ORDER BY embedding <=> $1 LIMIT 10;
+    ```
+  options:
+    - "クエリはコサイン距離（`<=>`）だが、インデックスは L2 距離の演算子クラスで作られている"
+    - "HNSW は `LIMIT` 付きのクエリに使えない"
+    - "`maintenance_work_mem` が小さすぎる"
+    - "`hnsw.ef_search` が既定値 40 のままである"
+  answer: A
+  explanation: |
+    インデックスの演算子クラスとクエリの演算子が一致しないとインデックスは使われません。
+    `<=>`（コサイン）なら `vector_cosine_ops`、`<->`（L2）なら `vector_l2_ops`、`<#>`（負の内積）なら `vector_ip_ops` です。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-hnsw-ivfflat
+  objective: "2.7"
+  type: match
+  difficulty: 2
+  tags: [postgresql, pgvector, index]
+  question: |
+    pgvector のインデックスの特徴を、HNSW と IVFFlat に対応付けてください。
+  pairs:
+    - left: "空のテーブルに先にインデックスを作成できる"
+      right: "HNSW"
+    - left: "ビルドが速く、メモリ使用量が少ない"
+      right: "IVFFlat"
+    - left: "検索時のパラメーター `ef_search`（既定 40）でリコールを調整する"
+      right: "HNSW"
+    - left: "検索時のパラメーター `probes`（既定 1）でリコールを調整する"
+      right: "IVFFlat"
+  explanation: |
+    HNSW はグラフ型で、速度とリコールのバランスが良い反面、ビルドが遅くメモリを多く使います。学習不要なので空のテーブルにも作れます。
+    IVFFlat はデータからリスト（クラスター）を学習するため、**データ投入後に作成**します。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-build-speed
+  objective: "2.7"
+  type: single
+  difficulty: 2
+  tags: [postgresql, pgvector, index]
+  question: |
+    稼働中の 500 万行のテーブルに HNSW インデックスを追加します。作成に時間がかかりすぎ、書き込みも止めたくありません。サーバーのメモリには余裕があります。最も適切な組み合わせはどれですか。
+  options:
+    - "`maintenance_work_mem` を増やし、`CREATE INDEX CONCURRENTLY` で作成する"
+    - "`hnsw.ef_search` を増やし、通常の `CREATE INDEX` で作成する"
+    - "`work_mem` を減らし、テーブルをロックしてから作成する"
+    - "IVFFlat を空のテーブルで先に作成してからデータを移す"
+  answer: A
+  explanation: |
+    HNSW のビルドはグラフが `maintenance_work_mem` に収まると大幅に速くなります。`CONCURRENTLY` を付けると書き込みをブロックせずに作成できます。
+    `ef_search` は検索時のパラメーターで、ビルド時間には関係しません。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+# ---------- 2.8 コンピューティング・メモリ・ストレージ ----------
+- id: d-pg-memory-tier
+  objective: "2.8"
+  type: single
+  difficulty: 2
+  tags: [postgresql, compute]
+  question: |
+    ベクトル検索の遅延が大きく、監視するとディスクの読み取りが多く、HNSW インデックスがメモリに収まっていないことが分かりました。CPU 使用率は低めです。最も効果的な対処はどれですか。
+  options:
+    - "Memory Optimized 層（メモリ比の高い SKU）にスケールアップする"
+    - "Burstable 層に変更する"
+    - "`hnsw.ef_search` を大きくする"
+    - "読み取りレプリカを削除する"
+  answer: A
+  explanation: |
+    インデックスがメモリ（`shared_buffers` / OS キャッシュ）に収まらないとディスク I/O が増えます。
+    メモリ比の高い **Memory Optimized** 層にするか、`halfvec` でインデックスを小さくします。`ef_search` を上げると逆に遅くなります。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+- id: d-pg-storage-iops
+  objective: "2.8"
+  type: single
+  difficulty: 2
+  tags: [postgresql, storage]
+  question: |
+    ベクトル ワークロードで IOPS が上限に達しています。データ量は小さく、ストレージ容量は増やしたくありません。どれを選ぶべきですか。
+  options:
+    - "Premium SSD v2 にして、容量とは別に IOPS とスループットを設定する"
+    - "Premium SSD の容量だけを増やす"
+    - "`max_connections` を増やす"
+    - "PgBouncer のプール サイズを増やす"
+  answer: A
+  explanation: |
+    Premium SSD では IOPS がディスク サイズに比例するため、容量を増やさないと IOPS が増えません。
+    **Premium SSD v2** は容量と独立して IOPS とスループットを設定できます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+- id: d-pg-read-replica
+  objective: "2.8"
+  type: single
+  difficulty: 1
+  tags: [postgresql, scale]
+  question: |
+    RAG の検索クエリ（読み取りのみ）が主サーバーの負荷の大半を占め、書き込みが遅くなっています。アプリの変更を最小限にして読み取り負荷を分散するにはどうしますか。
+  options:
+    - "読み取りレプリカを作成し、検索クエリをレプリカに向ける"
+    - "高可用性（ゾーン冗長）を有効にし、スタンバイに検索を向ける"
+    - "主サーバーを Burstable 層に変更する"
+    - "IVFFlat の `lists` を 1 にする"
+  answer: A
+  explanation: |
+    **読み取りレプリカ**は読み取り専用のクエリを逃がすための機能です。高可用性のスタンバイは読み取りに使えません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/read-replica/concepts-read-replicas
+
+# ---------- 2.9 ベクトル検索と RAG ----------
+- id: d-pg-rag-query
+  objective: "2.9"
+  type: dropdown
+  difficulty: 2
+  tags: [postgresql, pgvector, rag, sql]
+  question: |
+    テナントと文書種別で絞り込み、コサイン類似度が高い上位 5 件を返す RAG の検索クエリを完成させてください（HNSW インデックスは `vector_cosine_ops`）。
+  language: sql
+  template: |
+    SELECT id, content, 1 - (embedding {{1}} %(q)s) AS similarity
+    FROM chunks
+    WHERE tenant_id = %(t)s AND doc_type = 'manual'
+    ORDER BY embedding {{2}} %(q)s
+    {{3}} 5;
+  blanks:
+    "1": {options: ["<=>", "<->", "<#>"], answer: "<=>"}
+    "2": {options: ["<=>", "<->", "<#>"], answer: "<=>"}
+    "3": {options: [LIMIT, TOP, FETCH], answer: LIMIT}
+  explanation: |
+    `<=>` はコサイン**距離**（小さいほど近い）で、類似度は `1 - 距離` です。インデックスを使うには `ORDER BY <演算子> LIMIT k` の形にします。
+    `<->` は L2 距離、`<#>` は負の内積です。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-filter-iterative
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, filter]
+  question: |
+    HNSW インデックスを使い、`WHERE tenant_id = 'small-tenant'` で絞った上位 10 件を検索すると、3 件しか返らないことがあります。
+    このテナントのデータは全体の 1% です。pgvector 0.8 以降で、最も直接的な対処はどれですか。
+  options:
+    - "`SET hnsw.iterative_scan = strict_order;`（または `relaxed_order`）を有効にする"
+    - "`ivfflat.probes` を 1 にする"
+    - "`LIMIT` を外す"
+    - "演算子を `<->` に変える"
+  answer: A
+  explanation: |
+    近似インデックスでは**インデックス走査の後にフィルターが適用**されるため、`ef_search` 個の候補のうち条件に合うものが少ないと件数が不足します。
+    **反復インデックス スキャン**を有効にすると、足りない分を自動で追加走査します。ほかに `ef_search` を上げる、部分インデックスやパーティショニングも有効です。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-operators
+  objective: "2.9"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, pgvector]
+  question: |
+    pgvector の演算子について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`<#>` は内積を負の値で返す。"
+      answer: true
+    - text: "`<=>` の値が小さいほど、2 つのベクトルは似ている。"
+      answer: true
+    - text: "`ORDER BY embedding <=> $1` に `LIMIT` を付けなくても、ベクトル インデックスが使われる。"
+      answer: false
+  explanation: |
+    PostgreSQL のインデックスは昇順スキャンだけをサポートするため、`<#>` は**負の**内積を返します。`<=>` はコサイン距離です。
+    近似インデックスを使うには `ORDER BY` と `LIMIT` の両方が必要です。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+# ---------- 2.10 接続の最適化 ----------
+- id: d-pg-pgbouncer
+  objective: "2.10"
+  type: single
+  difficulty: 2
+  tags: [postgresql, pgbouncer]
+  question: |
+    Azure Functions から General Purpose 層の PostgreSQL に接続しています。負荷が高まると「too many connections」エラーが出ます。最小限の変更での対処はどれですか。
+  options:
+    - "組み込み PgBouncer を有効（`pgbouncer.enabled = true`）にし、接続先ポートを 6432 に変える"
+    - "`max_connections` を無制限にする"
+    - "サーバーを Burstable 層に変える"
+    - "接続文字列の `sslmode` を `disable` にする"
+  answer: A
+  explanation: |
+    PostgreSQL は 1 接続 = 1 プロセスで、多数の接続は重くなります。組み込み **PgBouncer** を有効にし（再起動不要）、同じホスト名の **ポート 6432** に接続します。
+    組み込み PgBouncer は **General Purpose / Memory Optimized** 層で使え、Burstable 層では使えません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer
+
+- id: d-pg-set-local
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgbouncer]
+  question: |
+    PgBouncer（ポート 6432）経由に切り替えたところ、接続直後に実行している `SET hnsw.ef_search = 200;` が効いたり効かなかったりするようになりました。最も適切な対処はどれですか。
+  options:
+    - "トランザクション内で `SET LOCAL hnsw.ef_search = 200;` を実行してから検索する"
+    - "`pgbouncer.default_pool_size` を 1 にする"
+    - "`SET` を 2 回実行する"
+    - "ポートを 5433 に変える"
+  answer: A
+  explanation: |
+    組み込み PgBouncer の既定のプール モードは **transaction** で、トランザクションごとに別のサーバー接続が使われることがあります。
+    そのため、セッション単位の `SET` は引き継がれません。トランザクション内で `SET LOCAL` を使います。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices
+
+- id: d-pg-pgbouncer-facts
+  objective: "2.10"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, pgbouncer]
+  question: |
+    Azure Database for PostgreSQL フレキシブル サーバーの組み込み PgBouncer について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "Burstable 層でも利用できる。"
+      answer: false
+    - text: "有効にするにはサーバーの再起動が必要である。"
+      answer: false
+    - text: "既定のプール モードは transaction である。"
+      answer: true
+    - text: "Microsoft Entra 認証に対応している。"
+      answer: true
+  explanation: |
+    組み込み PgBouncer は General Purpose / Memory Optimized 層でのみ利用でき、`pgbouncer.enabled` を true にするだけで再起動は不要です。
+    既定のプール モードは transaction（OSS 版の既定は session）で、Entra 認証にも対応しています。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer
+
+# ---------- 2.11 Azure Managed Redis のデータ操作 ----------
+- id: d-redis-invalidate
+  objective: "2.11"
+  type: single
+  difficulty: 1
+  tags: [redis, cache]
+  question: |
+    商品情報をキャッシュ アサイドで Redis にキャッシュしています（TTL 1 時間）。DB で価格を更新した直後に、古い価格が表示される問題を最小限の遅延で解決したいと考えています。
+  options:
+    - "DB を更新する処理の中で、該当するキャッシュのキーを削除（`DEL` / `UNLINK`）する"
+    - "TTL を 24 時間に延ばす"
+    - "追い出しポリシーを `noeviction` にする"
+    - "読み取りのたびに `KEYS product:*` で全キーを確認する"
+  answer: A
+  explanation: |
+    書き込み時にキーを削除すれば、次の読み取りでキャッシュ アサイドにより最新値が読み込まれます。
+    `KEYS` は全キーを走査してサーバーをブロックするため本番では使いません。
+  refs:
+    - https://learn.microsoft.com/azure/architecture/patterns/cache-aside
+
+- id: d-redis-ttl-facts
+  objective: "2.11"
+  type: yesno
+  difficulty: 2
+  tags: [redis, ttl, eviction]
+  question: |
+    Azure Managed Redis のデータ操作について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "`TTL key` が -1 を返すのは、キーは存在するが有効期限が設定されていない場合である。"
+      answer: true
+    - text: "TTL 付きのキーを `SET` で上書きしても、元の TTL は維持される（`KEEPTTL` なし）。"
+      answer: false
+    - text: "既定の追い出しポリシー `volatile-lru` では、TTL のないキーも追い出しの対象になる。"
+      answer: false
+    - text: "TTL にランダムなばらつきを加えると、大量のキーが同時に期限切れになる問題を緩和できる。"
+      answer: true
+  explanation: |
+    `TTL` は -1（期限なし）/ -2（キーなし）を返します。`SET` は `KEEPTTL` を付けない限り TTL を消します。
+    AMR の既定 `volatile-lru` は **TTL が設定されたキーだけ**を追い出します。ジッターはキャッシュの一斉失効を防ぎます。
+  refs:
+    - https://learn.microsoft.com/azure/redis/best-practices-memory-management
+    - https://redis.io/docs/latest/commands/ttl/
+
+- id: d-redis-streams
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, streams, messaging]
+  question: |
+    埋め込み生成のジョブを 5 台のワーカーで分担し、ワーカーが途中で落ちても未処理のジョブを他のワーカーが引き継げるようにしたいと考えています。Redis で実装する場合、どれを使いますか。
+  options:
+    - "pub/sub（`PUBLISH` / `SUBSCRIBE`）"
+    - "Redis Streams とコンシューマー グループ（`XREADGROUP` / `XACK` / `XAUTOCLAIM`）"
+    - "String と `EXPIRE`"
+    - "キースペース通知"
+  answer: B
+  explanation: |
+    pub/sub は購読中の全員に配る**ブロードキャスト**で、永続化されず、確認応答もありません。
+    **Streams** はコンシューマー グループ内で 1 メッセージを 1 人に配り、`XACK` されるまで保留リストに残るので、`XAUTOCLAIM` で他のワーカーが引き取れます。
+  refs:
+    - https://redis.io/docs/latest/develop/data-types/streams/
+
+- id: d-redis-amr-basics
+  objective: "2.11"
+  type: single
+  difficulty: 2
+  tags: [redis, amr]
+  question: |
+    Azure Managed Redis（AMR）について正しい記述はどれですか。
+  options:
+    - "`az redis create --sku Basic` で作成し、ポート 6380 で接続する"
+    - "`az redisenterprise create` で作成し、TLS のポート 10000 で `<name>.<region>.redis.azure.net` に接続する"
+    - "シングル スレッドのコミュニティ版 Redis で動作する"
+    - "Microsoft Entra ID 認証は使えない"
+  answer: B
+  explanation: |
+    AMR は Redis Enterprise ベースで、CLI は `az redisenterprise`、TLS ポートは **10000** です。Entra ID 認証は既定で有効です。
+    `az redis` とポート 6380 は Azure Cache for Redis（2028-09-30 に廃止予定）です。
+  refs:
+    - https://learn.microsoft.com/azure/redis/overview
+
+# ---------- 2.12 ベクトル インデックス ----------
+- id: d-redis-redisearch-requirements
+  objective: "2.12"
+  type: multiple
+  difficulty: 2
+  tags: [redis, redisearch, vector]
+  question: |
+    Azure Managed Redis で RediSearch によるベクトル検索を使います。作成時の設定として**必須**のものを **2 つ**選んでください。
+  options:
+    - "Enterprise クラスタリング ポリシー"
+    - "NoEviction 追い出しポリシー"
+    - "OSS クラスタリング ポリシー"
+    - "Flash Optimized レベル"
+    - "非クラスター（25 GB 以下）"
+  answer: [A, B]
+  explanation: |
+    RediSearch には **Enterprise クラスタリング ポリシー**と **NoEviction** が必要です。OSS ポリシーとは併用できず、Flash Optimized では RediSearch を使えません。
+    モジュールは**作成時にしか追加できません**。
+  refs:
+    - https://learn.microsoft.com/azure/redis/redis-modules
+
+- id: d-redis-add-module
+  objective: "2.12"
+  type: single
+  difficulty: 2
+  tags: [redis, redisearch]
+  question: |
+    キャッシュ用途で作成済みの Azure Managed Redis（Balanced、モジュールなし）に、ベクトル検索を追加したくなりました。どうすればよいですか。
+  options:
+    - "ポータルの「モジュール」から RediSearch を追加する"
+    - "`FT.CONFIG` コマンドで RediSearch を有効にする"
+    - "RediSearch（Enterprise ポリシー、NoEviction）を指定して新しいインスタンスを作成し、データを移行する"
+    - "Compute Optimized にスケールすると自動で有効になる"
+  answer: C
+  explanation: |
+    AMR のモジュールは**作成時にのみ**有効にでき、後から追加できません。手動でモジュールを読み込むこともできません。新しいインスタンスを作って移行します。
+  refs:
+    - https://learn.microsoft.com/azure/redis/redis-modules
+
+- id: d-redis-ftcreate
+  objective: "2.12"
+  type: dropdown
+  difficulty: 2
+  tags: [redis, redisearch, vector]
+  question: |
+    HASH に保存した 1536 次元の埋め込み（float32 のバイト列）を、コサイン距離で近似検索するインデックスを作成します。コマンドを完成させてください。
+  language: text
+  template: |
+    FT.CREATE idx:chunks ON HASH PREFIX 1 chunk:
+      SCHEMA
+        content   TEXT
+        tenant    {{1}}
+        embedding VECTOR {{2}} 6 TYPE {{3}} DIM 1536 DISTANCE_METRIC {{4}}
+  blanks:
+    "1": {options: [TAG, VECTOR, GEO], answer: TAG}
+    "2": {options: [HNSW, FLAT, IVF], answer: HNSW}
+    "3": {options: [FLOAT32, INT64, STRING], answer: FLOAT32}
+    "4": {options: [COSINE, L1, JACCARD], answer: COSINE}
+  explanation: |
+    テナントのような完全一致のフィルターは `TAG` フィールドにします。近似検索は `HNSW`（正確な総当たりは `FLAT`）、型は `FLOAT32`、距離は `COSINE` / `L2` / `IP` から選びます。
+    検索は `FT.SEARCH idx:chunks "(@tenant:{contoso})=>[KNN 5 @embedding $vec AS score]" PARAMS 2 vec <bytes> DIALECT 2` のように書きます。
+  refs:
+    - https://learn.microsoft.com/azure/redis/overview-vector-similarity
+    - https://redis.io/docs/latest/develop/ai/search-and-query/vectors/
+
+- id: d-redis-semantic-cache
+  objective: "2.12"
+  type: order
+  difficulty: 2
+  tags: [redis, semantic-cache, vector]
+  question: |
+    Azure Managed Redis でセマンティック キャッシュを実装します。1 件の質問を処理する流れを正しい順に並べてください。
+  items:
+    - "質問の埋め込みを生成する"
+    - "Redis で KNN 検索し、最も近い過去の質問との距離を求める"
+    - "距離がしきい値以下なら、保存済みの回答を返して終了する"
+    - "しきい値を超えたら LLM を呼び出し、質問の埋め込みと回答を TTL 付きで保存する"
+  distractors:
+    - "Redis の全キーを KEYS で列挙する"
+  explanation: |
+    セマンティック キャッシュは、似た質問への LLM 呼び出しを減らすパターンです。埋め込み → KNN 検索 → しきい値で判定 → ミスなら LLM を呼んで保存、の順で処理します。
+    RedisVL の `SemanticCache` でも実装できます。
+  refs:
+    - https://learn.microsoft.com/azure/redis/tutorial-semantic-cache

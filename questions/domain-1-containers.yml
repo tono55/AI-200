@@ -1,0 +1,519 @@
+# 分野 1: Develop containerized solutions on Azure (20–25%)
+# 形式は docs/04-question-bank.md を参照
+
+# ---------- 1.1 Azure Container Registry ----------
+- id: c-acr-unique-tag
+  objective: "1.1"
+  type: single
+  difficulty: 1
+  tags: [acr, tag, digest]
+  question: |
+    本番環境の Container Apps に、ビルドごとにイメージをデプロイしています。
+    デプロイ後に同じタグのイメージが上書きされ、意図しないバージョンが起動する事故がありました。
+    **デプロイしたイメージの中身が後から変わらない**ようにするには、どのタグ戦略を採用すべきですか。
+  options:
+    - "すべてのビルドで `latest` タグを付け、デプロイでは `latest` を参照する"
+    - "メジャー・マイナー番号だけの安定タグ（例: `1.4`）を付けて参照する"
+    - "ビルド ID や Git のコミット SHA などの一意タグ（またはダイジェスト）で参照する"
+    - "ACR の管理者ユーザーを有効にしてプッシュする"
+  answer: C
+  explanation: |
+    `latest` や `1.4` のような**安定タグ**は、新しいビルドのたびに付け替えられるため、同じタグでも中身が変わります。
+    本番デプロイでは**一意タグ**（ビルド ID、コミット SHA）か、不変の**ダイジェスト**（`@sha256:...`）で参照します。
+    さらに `az acr repository update --write-enabled false` でタグをロックすると上書きを防げます。管理者ユーザーはタグとは無関係です。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-image-tag-version
+
+- id: c-acr-premium-features
+  objective: "1.1"
+  type: multiple
+  difficulty: 2
+  tags: [acr, sku]
+  question: |
+    ACR の SKU を選んでいます。次のうち、**Premium SKU でのみ**利用できる機能はどれですか。**2 つ**選んでください。
+  options:
+    - "geo レプリケーション（複数リージョンに 1 つのレジストリを複製）"
+    - "プライベート エンドポイント（Private Link）によるアクセス制限"
+    - "Microsoft Entra ID による認証"
+    - "ACR Tasks によるクラウド ビルド"
+    - "マネージド ID と AcrPull ロールによるイメージのプル"
+  answer: [A, B]
+  explanation: |
+    Basic / Standard / Premium は同じ API と基本機能（Entra 認証、マネージド ID、ACR Tasks など）を持ちます。
+    Premium で追加されるのは、**geo レプリケーション**、**Private Link（プライベート エンドポイント）**、より多いストレージと高いスループットなどです。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-skus
+
+- id: c-acr-auth-match
+  objective: "1.1"
+  type: match
+  difficulty: 2
+  tags: [acr, authentication]
+  question: |
+    ACR への認証方法として最も適切なものを、それぞれのシナリオに対応付けてください。
+  pairs:
+    - left: "開発者が手元の PC から Docker でイメージをプッシュする"
+      right: "`az acr login`（個人の Microsoft Entra ID）"
+    - left: "Container Apps / App Service がイメージをプルする"
+      right: "マネージド ID に AcrPull ロールを付与"
+    - left: "外部の CI サービスがビルドしたイメージをプッシュする"
+      right: "サービス プリンシパル（またはフェデレーション資格情報）に AcrPush ロールを付与"
+  distractors:
+    - "管理者ユーザーのパスワードを共有"
+  explanation: |
+    - 開発者の手元では個人の Entra ID で `az acr login`。
+    - Azure のサービスからのプルは、シークレット不要の**マネージド ID + AcrPull** が推奨です。
+    - CI からのプッシュはサービス プリンシパルなどに **AcrPush** を付与します。
+    - 管理者ユーザーは既定で無効で、1 つの資格情報を共有するため本番では推奨されません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-authentication
+
+# ---------- 1.2 ACR Tasks ----------
+- id: c-acrtask-quick-build
+  objective: "1.2"
+  type: single
+  difficulty: 1
+  tags: [acr-tasks]
+  question: |
+    CI ランナーでは Docker デーモンを使えません。リポジトリの Dockerfile からイメージをビルドし、
+    ACR `myreg` にプッシュしたいと考えています。実行すべきコマンドはどれですか。
+  options:
+    - "`docker build -t myreg.azurecr.io/api:1 . && docker push myreg.azurecr.io/api:1`"
+    - "`az acr build -r myreg -t api:{{.Run.ID}} .`"
+    - "`az acr import -n myreg --source ./Dockerfile`"
+    - "`az acr login -n myreg --expose-token`"
+  answer: B
+  explanation: |
+    **クイック タスク** `az acr build` は、ソースを ACR にアップロードし、Azure 上でビルドしてプッシュします（ローカルに Docker は不要）。
+    `az acr import` は既存のイメージを他のレジストリから取り込むコマンドで、Dockerfile はビルドできません。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+
+- id: c-acrtask-triggers
+  objective: "1.2"
+  type: yesno
+  difficulty: 2
+  tags: [acr-tasks, trigger]
+  question: |
+    Git リポジトリをコンテキストにした ACR Task（`az acr task create`）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "ソース コードのコミットによるトリガーは、既定で有効になる。"
+      answer: true
+    - text: "プル リクエストによるトリガーは、既定で有効になる。"
+      answer: false
+    - text: "ベース イメージが更新されたときに再ビルドするトリガーを使うと、OS やフレームワークのパッチを自動で取り込める。"
+      answer: true
+    - text: "タイマー トリガーは cron 式で指定し、時刻は UTC で解釈される。"
+      answer: true
+  explanation: |
+    ACR Tasks のトリガーは、コミット（既定で有効）、プル リクエスト（**既定で無効**）、ベース イメージの更新、タイマー（cron、UTC）があります。
+    ベース イメージ更新トリガーにより、`python:3.12-slim` などの親イメージの更新を検知して自動で再ビルドできます。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-overview
+
+- id: c-acrtask-multistep
+  objective: "1.2"
+  type: dropdown
+  difficulty: 2
+  tags: [acr-tasks, yaml]
+  question: |
+    ビルド → ビルドしたイメージでテスト → プッシュ、を行うマルチステップ タスクの YAML を完成させてください。
+  language: yaml
+  template: |
+    version: v1.1.0
+    steps:
+      - {{1}}: -t $Registry/api:$ID -f Dockerfile .
+      - {{2}}: $Registry/api:$ID python -m pytest
+      - {{3}}:
+        - $Registry/api:$ID
+  blanks:
+    "1": {options: [build, cmd, push, run], answer: build}
+    "2": {options: [build, cmd, push, run], answer: cmd}
+    "3": {options: [build, cmd, push, run], answer: push}
+  explanation: |
+    マルチステップ タスクのステップ種別は `build`（イメージのビルド）、`cmd`（コンテナーとして実行）、`push`（レジストリへプッシュ）です。
+    `$Registry` と `$ID`（実行 ID）は ACR Tasks が提供する変数です。`az acr run -f acr-task.yaml .` で実行します。
+  refs:
+    - https://learn.microsoft.com/azure/container-registry/container-registry-tasks-reference-yaml
+
+# ---------- 1.3 App Service ----------
+- id: c-appsvc-acr-mi
+  objective: "1.3"
+  type: multiple
+  difficulty: 2
+  tags: [app-service, acr, managed-identity]
+  question: |
+    Linux の App Service でカスタム コンテナーを動かしています。ACR の管理者ユーザーやパスワードを使わずに、
+    App Service のシステム割り当てマネージド ID でイメージをプルさせたいと考えています。必要な作業を **2 つ**選んでください。
+  options:
+    - "マネージド ID に ACR の AcrPull ロールを割り当てる"
+    - "サイト構成で `acrUseManagedIdentityCreds` を `true` にする"
+    - "ACR の管理者ユーザーを有効にする"
+    - "アプリ設定 `WEBSITES_PORT` を設定する"
+    - "ACR を Premium SKU にアップグレードする"
+  answer: [A, B]
+  explanation: |
+    マネージド ID でプルするには、①ID に **AcrPull** を付与し、②`acrUseManagedIdentityCreds=true`（ユーザー割り当て ID なら `acrUserManagedIdentityID` も）を設定します。
+    `WEBSITES_PORT` は待ち受けポートの設定で、プルの認証とは無関係です。SKU は関係ありません。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-custom-container
+
+- id: c-appsvc-kvref
+  objective: "1.3"
+  type: single
+  difficulty: 2
+  tags: [app-service, key-vault]
+  question: |
+    App Service のコンテナー アプリに、Key Vault `kv-prod` のシークレット `db-password` を環境変数として渡したいと考えています。
+    シークレットがローテーションされたら、コードを変えずに新しい値を使うようにしたいです。アプリ設定の値として最も適切なものはどれですか。
+  options:
+    - "`@Microsoft.KeyVault(SecretUri=https://kv-prod.vault.azure.net/secrets/db-password)`"
+    - "`@Microsoft.KeyVault(SecretUri=https://kv-prod.vault.azure.net/secrets/db-password/3f2c...e91)`"
+    - "`keyvaultref:https://kv-prod.vault.azure.net/secrets/db-password,identityref:system`"
+    - "シークレットの値を直接アプリ設定に貼り付け、スロット設定にする"
+  answer: A
+  explanation: |
+    App Service の Key Vault 参照は `@Microsoft.KeyVault(...)` 形式です。**バージョンを省略**すると最新版を使い、新しいバージョンは **24 時間以内**に取り込まれます（構成を変更して再起動すれば即時）。
+    バージョンを指定すると固定されます。`keyvaultref:` は **Container Apps** のシークレットの書式です。アプリの ID には `Key Vault Secrets User` が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/app-service-key-vault-references
+
+- id: c-appsvc-port
+  objective: "1.3"
+  type: single
+  difficulty: 1
+  tags: [app-service, configuration]
+  question: |
+    コンテナー内の Web サーバーがポート 8000 で待ち受けています。App Service にデプロイしたところ、コンテナーの起動確認がタイムアウトしました。
+    最も適切な対処はどれですか。
+  options:
+    - "アプリ設定 `WEBSITES_PORT=8000` を追加する"
+    - "アプリ設定 `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true` を追加する"
+    - "Always On を無効にする"
+    - "デプロイ スロットを作成してスワップする"
+  answer: A
+  explanation: |
+    App Service はコンテナーが 80 / 8080 で待ち受けていることを前提に起動確認します。それ以外のポートは `WEBSITES_PORT` で指定します。
+    `WEBSITES_ENABLE_APP_SERVICE_STORAGE` は `/home` の永続化の設定です。
+  refs:
+    - https://learn.microsoft.com/azure/app-service/configure-custom-container
+
+# ---------- 1.4 Container Apps ----------
+- id: c-aca-revision-scope
+  objective: "1.4"
+  type: yesno
+  difficulty: 2
+  tags: [container-apps, revision]
+  question: |
+    Azure Container Apps（単一リビジョン モード）で次の変更を行います。それぞれ**新しいリビジョンが作成される**かを答えてください。
+  statements:
+    - text: "コンテナー イメージのタグを変更する。"
+      answer: true
+    - text: "アプリのシークレットの値を変更する。"
+      answer: false
+    - text: "環境変数を追加する。"
+      answer: true
+    - text: "イングレスの設定（外部 / 内部）を変更する。"
+      answer: false
+  explanation: |
+    `properties.template` 配下（イメージ、環境変数、CPU / メモリ、スケール ルール、プローブ）は**リビジョン スコープ**で、変更すると新しいリビジョンが作られます。
+    シークレット、イングレス、レジストリ、リビジョン モードなどは**アプリケーション スコープ**で、新しいリビジョンは作られません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/revisions
+
+- id: c-aca-canary
+  objective: "1.4"
+  type: single
+  difficulty: 2
+  tags: [container-apps, traffic-splitting]
+  question: |
+    Container Apps で新しいバージョンをまず 10% のトラフィックだけに公開し、問題がなければ 100% に切り替えたいと考えています。何をすべきですか。
+  options:
+    - "単一リビジョン モードのまま新しいイメージをデプロイする"
+    - "複数リビジョン モードに切り替え、`az containerapp ingress traffic set` で旧 90 / 新 10 の重みを設定する"
+    - "最大レプリカ数を 10% に設定する"
+    - "新しい Container Apps 環境を作り、DNS で切り替える"
+  answer: B
+  explanation: |
+    トラフィック分割は**複数リビジョン モード**でのみ可能です。単一リビジョン モードは、新しいリビジョンの準備ができた時点で 100% を切り替えます。
+    ラベルを使うと、特定のリビジョンに固定 URL でアクセスさせることもできます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/revisions
+    - https://learn.microsoft.com/azure/container-apps/traffic-splitting
+
+- id: c-aca-secret-refresh
+  objective: "1.4"
+  type: single
+  difficulty: 3
+  tags: [container-apps, secrets, key-vault]
+  question: |
+    Container Apps のシークレット `db-pass` を `az containerapp secret set` で直接（Key Vault 参照ではなく）新しい値に更新しました。
+    しかし、実行中のアプリの環境変数 `DB_PASS`（`secretRef: db-pass`）は古い値のままです。最も適切な対処はどれですか。
+  options:
+    - "30 分待つ。自動で新しい値が取り込まれる"
+    - "リビジョンを再起動する（または新しいリビジョンをデプロイする）"
+    - "シークレット名を大文字にする"
+    - "最小レプリカ数を 0 にする"
+  answer: B
+  explanation: |
+    シークレットはアプリケーション スコープで、更新しても新しいリビジョンは作られず、既存のリビジョンにも自動では反映されません。
+    `az containerapp revision restart` で再起動するか、新しいリビジョンをデプロイします。
+    なお、**バージョンなしの Key Vault 参照**のシークレットであれば、30 分以内に新しいバージョンが取得され、参照しているリビジョンが自動で再起動されます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/manage-secrets
+
+# ---------- 1.5 KEDA ----------
+- id: c-keda-servicebus
+  objective: "1.5"
+  type: single
+  difficulty: 2
+  tags: [container-apps, keda, service-bus]
+  question: |
+    Service Bus キュー `inference` のメッセージ数に応じてワーカー（Container Apps）を増やし、キューが空なら 0 にしたいと考えています。
+    どのスケール設定を使うべきですか。
+  options:
+    - "HTTP スケール ルール（`concurrentRequests`）と `minReplicas: 1`"
+    - "CPU 使用率のスケール ルールと `minReplicas: 0`"
+    - "カスタム スケール ルール `type: azure-servicebus`（`queueName`、`messageCount`）と `minReplicas: 0`"
+    - "TCP スケール ルール（`concurrentConnections`）と `minReplicas: 0`"
+  answer: C
+  explanation: |
+    キューの長さで判断するには KEDA の **azure-servicebus スケーラー**（カスタム ルール）を使います。認証はシークレット参照かマネージド ID です。
+    HTTP / TCP ルールはキューの長さを見られません。CPU / メモリのルールだけでは 0 までスケール インできません。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-defaults
+  objective: "1.5"
+  type: yesno
+  difficulty: 2
+  tags: [container-apps, keda]
+  question: |
+    Azure Container Apps のスケーリングについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "最大レプリカ数を指定しない場合の既定値は 10 である。"
+      answer: true
+    - text: "カスタム（KEDA）ルールの既定のポーリング間隔は 30 秒である。"
+      answer: true
+    - text: "既定のクールダウン期間（300 秒）は、レプリカを 1 つ減らすたびに毎回適用される。"
+      answer: false
+    - text: "複数のスケール ルールを定義した場合、すべてのルールの条件を満たしたときにだけスケール アウトする。"
+      answer: false
+  explanation: |
+    既定は最小 0 / 最大 10（最大 1,000 まで設定可）、KEDA ルールのポーリング 30 秒、クールダウン 300 秒です。
+    クールダウンは**最後の 1 レプリカから 0 にするときだけ**適用されます。複数のルールは、**どれか 1 つ**の条件を満たせばスケール アウトします。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+
+- id: c-keda-yaml
+  objective: "1.5"
+  type: dropdown
+  difficulty: 2
+  tags: [container-apps, keda, yaml]
+  question: |
+    Service Bus キューのメッセージが 5 件たまるごとにレプリカを追加し、メッセージがなければ 0 にする構成を完成させてください。
+  language: yaml
+  template: |
+    scale:
+      minReplicas: {{1}}
+      maxReplicas: 20
+      rules:
+        - name: sb-queue
+          {{2}}:
+            type: {{3}}
+            metadata:
+              queueName: inference
+              namespace: sb-ai200
+              {{4}}: "5"
+            identity: system
+  blanks:
+    "1": {options: ["0", "1", "5"], answer: "0"}
+    "2": {options: [custom, http, tcp], answer: custom}
+    "3": {options: [azure-servicebus, azure-queue, cpu], answer: azure-servicebus}
+    "4": {options: [messageCount, concurrentRequests, queueLength], answer: messageCount}
+  explanation: |
+    KEDA のスケーラーは `custom` ルールで指定します。Service Bus のスケーラーは `azure-servicebus` で、しきい値は `messageCount` です（Storage キューの `azure-queue` は `queueLength`）。
+    0 までスケール インするには `minReplicas: 0` にします。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/scale-app
+    - https://keda.sh/docs/latest/scalers/azure-service-bus/
+
+# ---------- 1.6 AKS manifests ----------
+- id: c-aks-service-selector
+  objective: "1.6"
+  type: single
+  difficulty: 2
+  tags: [aks, service]
+  question: |
+    次のマニフェストを適用したところ、`kubectl get endpoints api` の結果が空でした。Pod はすべて Running で Ready です。原因として最も可能性が高いのはどれですか。
+
+    ```yaml
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: api
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: rag-api
+      template:
+        metadata:
+          labels:
+            app: rag-api
+        spec:
+          containers:
+            - name: api
+              image: myreg.azurecr.io/api:42
+              ports:
+                - containerPort: 8000
+    ---
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: api
+    spec:
+      selector:
+        app: api
+      ports:
+        - port: 80
+          targetPort: 8000
+    ```
+  options:
+    - "Service の `selector` が Pod のラベルと一致していない"
+    - "`targetPort` と `containerPort` が一致していない"
+    - "Service の `type` が指定されていない"
+    - "Deployment の `replicas` が多すぎる"
+  answer: A
+  explanation: |
+    Service は `selector` に一致するラベルを持つ Pod をエンドポイントにします。Pod のラベルは `app: rag-api` ですが、Service の selector は `app: api` なので一致しません。
+    `type` を省略すると `ClusterIP` になるだけで、エンドポイントが空になる原因ではありません。
+  refs:
+    - https://learn.microsoft.com/azure/aks/concepts-network-services
+
+- id: c-aks-probes
+  objective: "1.6"
+  type: match
+  difficulty: 2
+  tags: [aks, probes]
+  question: |
+    Kubernetes のプローブと、失敗したとき（または成功するまで）の動作を対応付けてください。
+  pairs:
+    - left: "livenessProbe"
+      right: "コンテナーを再起動する"
+    - left: "readinessProbe"
+      right: "Service のエンドポイントから外す（再起動はしない）"
+    - left: "startupProbe"
+      right: "成功するまで他のプローブを実行しない"
+  distractors:
+    - "Pod を別のノードに移動する"
+  explanation: |
+    - liveness: 失敗するとコンテナーを再起動（デッドロックからの回復）。
+    - readiness: 失敗するとトラフィックを受けない（起動直後やモデル読み込み中）。
+    - startup: 起動が遅いアプリ向け。成功するまで liveness / readiness を止める。
+  refs:
+    - https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes
+
+- id: c-aks-pvc-rwx
+  objective: "1.6"
+  type: single
+  difficulty: 2
+  tags: [aks, storage]
+  question: |
+    AKS 上の複数ノードで動く推論 Pod が、同じモデル キャッシュ ディレクトリを**同時に読み書き**する必要があります。
+    PersistentVolumeClaim の設定として最も適切なものはどれですか。
+  options:
+    - "`storageClassName: managed-csi`、`accessModes: [ReadWriteOnce]`"
+    - "`storageClassName: azurefile-csi`、`accessModes: [ReadWriteMany]`"
+    - "`emptyDir` ボリュームを使う"
+    - "ConfigMap にモデルを格納する"
+  answer: B
+  explanation: |
+    Azure Disk（`managed-csi`）は ReadWriteOnce で 1 つのノードからしかマウントできません。複数ノード・複数 Pod で共有するなら **Azure Files（`azurefile-csi`）と ReadWriteMany** を使います。
+    `emptyDir` は Pod ごとの一時領域、ConfigMap は小さな設定値向けです。
+  refs:
+    - https://learn.microsoft.com/azure/aks/concepts-storage
+
+- id: c-aks-attach-acr
+  objective: "1.6"
+  type: single
+  difficulty: 1
+  tags: [aks, acr]
+  question: |
+    AKS クラスター `aks-ai200` が ACR `myreg` からイメージをプルできるようにする、最も簡単で推奨される方法はどれですか。
+  options:
+    - "`az aks update -n aks-ai200 -g rg --attach-acr myreg`"
+    - "ACR の管理者ユーザーを有効にして、パスワードを Kubernetes Secret に保存する"
+    - "ACR を匿名プル可能にする"
+    - "すべてのノードで `docker login` を実行する"
+  answer: A
+  explanation: |
+    `--attach-acr` は、AKS（kubelet）のマネージド ID に ACR の **AcrPull** ロールを割り当てます。シークレットの管理が不要です。
+  refs:
+    - https://learn.microsoft.com/azure/aks/cluster-container-registry-integration
+
+# ---------- 1.7 Troubleshoot ----------
+- id: c-trouble-pod-states
+  objective: "1.7"
+  type: match
+  difficulty: 2
+  tags: [aks, troubleshooting]
+  question: |
+    AKS の Pod の状態と、最も可能性の高い原因を対応付けてください。
+  pairs:
+    - left: "ImagePullBackOff"
+      right: "イメージ名の誤り、または ACR へのプル権限がない"
+    - left: "CrashLoopBackOff"
+      right: "コンテナーが起動直後に異常終了している（設定漏れ・例外）"
+    - left: "Pending"
+      right: "ノードの CPU / メモリ不足、または PVC がバインドされていない"
+    - left: "OOMKilled（終了コード 137）"
+      right: "メモリの limits を超えた"
+  explanation: |
+    - ImagePullBackOff: `kubectl describe pod` の Events を確認。ACR なら `--attach-acr`。
+    - CrashLoopBackOff: `kubectl logs <pod> --previous` で前回のログを見る。
+    - Pending: Events の `FailedScheduling`、`kubectl get pvc`。
+    - OOMKilled: `resources.limits.memory` を見直す。
+  refs:
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/create-upgrade-delete/pod-stuck-crashloopbackoff-mode
+    - https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/cannot-pull-image-from-acr-to-aks-cluster
+
+- id: c-trouble-logs-previous
+  objective: "1.7"
+  type: single
+  difficulty: 1
+  tags: [aks, kubectl]
+  question: |
+    Pod が CrashLoopBackOff を繰り返しています。`kubectl logs <pod>` では、再起動直後のため有用な情報が出ません。
+    クラッシュする直前のログを確認するコマンドはどれですか。
+  options:
+    - "`kubectl logs <pod> --previous`"
+    - "`kubectl get pods -o wide`"
+    - "`kubectl rollout undo deployment/<name>`"
+    - "`kubectl top pod <pod>`"
+  answer: A
+  explanation: |
+    `--previous`（`-p`）は、前回終了したコンテナー インスタンスのログを表示します。あわせて `kubectl describe pod` で終了コードと Events を確認します。
+  refs:
+    - https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/
+
+- id: c-trouble-aca-systemlogs
+  objective: "1.7"
+  type: single
+  difficulty: 2
+  tags: [container-apps, log-analytics, kql]
+  question: |
+    Container Apps の新しいリビジョンが `Failed` になりました。アプリのログは出ていません。
+    **イメージのプル失敗やプローブの失敗**などのプラットフォーム側のイベントを Log Analytics で調べるには、どのテーブルを見るべきですか。
+  options:
+    - "`ContainerAppConsoleLogs_CL`"
+    - "`ContainerAppSystemLogs_CL`"
+    - "`AppRequests`"
+    - "`KubePodInventory`"
+  answer: B
+  explanation: |
+    Container Apps のログは、アプリの標準出力 / 標準エラーが **ConsoleLogs**、イメージのプル・プローブ・スケールなどのプラットフォーム イベントが **SystemLogs** に入ります。
+    CLI では `az containerapp logs show --type system` でも確認できます。`KubePodInventory` は AKS（Container Insights）のテーブルです。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/log-monitoring
+    - https://learn.microsoft.com/azure/container-apps/troubleshoot-deployment-errors

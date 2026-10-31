@@ -56,6 +56,7 @@ docs/
 ├── 01-skills-outline.md          公式出題範囲（27 項目、英語原文＋公式日本語訳）、日本語用語の対応表、ラーニングパスの対応表
 ├── 02-az204-to-ai200.md          旧試験 AZ-204 との差分（継続・削除・新規）
 ├── 03-study-plan.md              8 週間の学習計画・学習サイクル・直前チェック
+├── 04-question-bank.md           知識チェック問題集（GitHub Pages）の仕組み・問題形式・追加手順
 ├── domains/                      分野別の学習ノート（すべて同じテンプレート）
 │   ├── 1-containers.md               分野1 コンテナ
 │   ├── 2a-cosmos-db.md               分野2 Cosmos DB for NoSQL
@@ -70,14 +71,28 @@ docs/
 ├── templates/
 │   └── domain-note-template.md       分野ノートの共通テンプレート
 └── sources.md                    出典一覧と情報の確度
+questions/                        問題集の問題データ（YAML。27 項目を網羅）
+site/                             問題集サイト（GitHub Pages で公開）
+scripts/build_questions.py        問題の検証・網羅チェック・JSON 生成
+.github/workflows/quiz-site.yml   検証と GitHub Pages へのデプロイ
 ```
+
+## 知識チェック問題集
+
+出題範囲 27 項目すべてを網羅するオリジナル問題（102 問）を、ブラウザーで解ける問題集にしています。
+
+- 公開先: <https://tono55.github.io/AI-200/>（リポジトリの Settings → Pages で Source を「GitHub Actions」にすると公開されます）
+- 学習モード（すぐに解説）、模擬試験（配点どおりの出題・タイマー・分野別採点）、網羅状況（項目ごとの正答率）
+- 問題形式: 単一選択 / 複数選択 / はい・いいえ / 並べ替え / 対応付け / コード穴埋め / ケーススタディ
+- 仕組みと問題の追加方法: [docs/04-question-bank.md](docs/04-question-bank.md)
 
 おすすめの読み方:
 
 1. [00-exam-overview](docs/00-exam-overview.md) と [01-skills-outline](docs/01-skills-outline.md) で全体像をつかむ
 2. AZ-204 経験者は [02-az204-to-ai200](docs/02-az204-to-ai200.md) で差分だけ確認する
 3. [03-study-plan](docs/03-study-plan.md) に沿って、[domains/](docs/domains/) の各ノートを順に進める
-4. 直前期は [cheatsheets/](docs/cheatsheets/) と各ノートの「確認問題」「チェックリスト」を回す
+4. 各分野を読み終えたら、問題集の学習モードでその分野を解き、間違えた問題をノートで復習する
+5. 直前期は [cheatsheets/](docs/cheatsheets/)、問題集の模擬試験、各ノートの「チェックリスト」を回す
 
 ## 分野ノートの共通テンプレート
 

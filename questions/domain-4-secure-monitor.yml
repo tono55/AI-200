@@ -1,0 +1,328 @@
+# 分野 4: Secure, monitor, and troubleshoot Azure solutions (20–25%)
+
+# ---------- 4.1 Key Vault ----------
+- id: m-kv-role
+  objective: "4.1"
+  type: single
+  difficulty: 1
+  tags: [key-vault, rbac]
+  question: |
+    Container Apps のアプリがマネージド ID で Key Vault（Azure RBAC モデル）のシークレットの値を読みます。最小権限のロールはどれですか。
+  options:
+    - "Key Vault Reader"
+    - "Key Vault Secrets User"
+    - "Key Vault Secrets Officer"
+    - "Key Vault Administrator"
+  answer: B
+  explanation: |
+    シークレットの**値を読む**だけなら **Key Vault Secrets User** です。Key Vault Reader はメタデータしか読めず、値は読めません。
+    Secrets Officer はシークレットの作成・更新・削除、Administrator はすべてのデータ操作ができます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+
+- id: m-kv-rotation-flow
+  objective: "4.1"
+  type: order
+  difficulty: 2
+  tags: [key-vault, rotation, event-grid, functions]
+  question: |
+    Key Vault に保存した DB のパスワードを、期限前に自動でローテーションする仕組みを作ります。処理の流れを正しい順に並べてください。
+  items:
+    - "シークレットの有効期限の 30 日前に、Key Vault が SecretNearExpiry イベントを発行する"
+    - "Event Grid が、サブスクリプションに登録された関数アプリにイベントを配信する"
+    - "関数が新しいパスワードを生成し、Key Vault にシークレットの新しいバージョンとして保存する"
+    - "関数が DB 側のパスワードを新しい値に更新する"
+  distractors:
+    - "Key Vault が DB のパスワードを自動で変更する"
+  explanation: |
+    Key Vault は相手先（DB）のパスワードを自分では変更できないため、**Event Grid（`SecretNearExpiry`）+ Azure Functions** で自動化します。
+    新バージョンの保存と DB の更新の間にずれが生じうるため、止められないシステムでは 2 組の資格情報を交互に使うパターンを検討します。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/secrets/tutorial-rotation
+
+- id: m-kv-softdelete-facts
+  objective: "4.1"
+  type: yesno
+  difficulty: 2
+  tags: [key-vault, soft-delete, purge-protection]
+  question: |
+    Key Vault の論理的な削除（soft delete）と消去保護（purge protection）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "消去保護は、一度有効にしても後から無効にできる。"
+      answer: false
+    - text: "論理的な削除の保持期間は 7〜90 日で、既定は 90 日である。"
+      answer: true
+    - text: "保持期間は、ボールト作成後にいつでも変更できる。"
+      answer: false
+    - text: "消去保護は既定では無効である。"
+      answer: true
+  explanation: |
+    論理的な削除は新しいボールトで既定で有効・無効化不可、保持期間（7〜90 日、既定 90）は**作成時にしか設定できません**。
+    消去保護は**既定で無効**で、一度有効にすると Microsoft を含め誰も無効化・回避できません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/soft-delete-overview
+    - https://learn.microsoft.com/azure/key-vault/general/key-vault-recovery
+
+- id: m-kv-cache
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, throttling, rotation]
+  question: |
+    高トラフィックの API がリクエストごとに Key Vault から API キーを取得しており、HTTP 429 が発生しています。ローテーション後の新しい値も使えるようにしたいと考えています。最も適切な対処はどれですか。
+  options:
+    - "バージョン付きの URI で取得し、アプリの起動時に一度だけ読む"
+    - "バージョンなしで取得した値をメモリに TTL 付きでキャッシュし、TTL ごとに再取得する（429 には指数バックオフ）"
+    - "Key Vault を Premium SKU に変更する"
+    - "シークレットをアプリ設定に平文で保存する"
+  answer: B
+  explanation: |
+    Key Vault にはボールト・リージョンごとのトランザクション上限があるため、アプリ側でシークレットを**キャッシュ**します。
+    バージョンなしで最新を取得し、TTL ごとに再取得すれば、ローテーション後の値にも追従できます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/overview-throttling
+
+# ---------- 4.2 App Configuration ----------
+- id: m-appcfg-sentinel
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, refresh]
+  question: |
+    App Configuration の 3 つの値を変更したところ、アプリが一部の値だけ新しくなった状態でしばらく動いていました。すべての値を一貫して切り替えるにはどうしますか。
+  options:
+    - "リフレッシュ間隔を 1 秒にする"
+    - "センチネル キーだけを監視し、ほかの値をすべて更新した後で最後にセンチネル キーを更新する"
+    - "すべてのキーにラベル `prod` を付ける"
+    - "スナップショットを毎分作成する"
+  answer: B
+  explanation: |
+    **センチネル キー**を監視対象にし（Python は `refresh_on=[WatchKey("sentinel")]`）、変更作業の最後に更新すると、センチネルの変化を検知したときに全体を一度に再読み込みします。
+    リフレッシュ間隔の既定は 30 秒で、Python などでは `refresh()` を呼ぶ必要があります。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/enable-dynamic-configuration-python
+
+- id: m-appcfg-kvref-403
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, key-vault, rbac]
+  question: |
+    App Configuration に Key Vault 参照を保存し、アプリ（マネージド ID）から `load(..., keyvault_credential=credential)` で読み込みます。
+    アプリの ID には App Configuration Data Reader を付与済みですが、Key Vault 参照の解決で 403 になります。何が不足していますか。
+  options:
+    - "App Configuration ストアのマネージド ID に Key Vault Secrets User を付与する"
+    - "アプリのマネージド ID に Key Vault の Key Vault Secrets User を付与する"
+    - "アプリの ID に App Configuration Data Owner を付与する"
+    - "Key Vault 参照を通常のキー値に変換する"
+  answer: B
+  explanation: |
+    App Configuration は Key Vault の**URI だけ**を保存し、値は**アプリが自分の ID で Key Vault から読みます**。そのため、アプリの ID に Key Vault の権限（Key Vault Secrets User）が必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/use-key-vault-references-dotnet-core
+
+- id: m-appcfg-feature-match
+  objective: "4.2"
+  type: match
+  difficulty: 2
+  tags: [app-configuration]
+  question: |
+    要件と、App Configuration（または関連サービス）の機能を対応付けてください。
+  pairs:
+    - left: "同じキーに dev と prod で別の値を持たせたい"
+      right: "ラベル"
+    - left: "新機能を 10% のユーザーにだけ段階的に公開したい"
+      right: "機能フラグ（ターゲット フィルター）"
+    - left: "リリース時点の構成を変更不可の形で固定し、ロールバックに使いたい"
+      right: "スナップショット"
+    - left: "API キーなどの機密情報を、構成と同じ読み込み処理で扱いたい"
+      right: "Key Vault 参照"
+  explanation: |
+    機密でない設定は App Configuration、シークレットは Key Vault に置き、App Configuration の Key Vault 参照で一元的に読み込みます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-feature-management
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-snapshots
+
+# ---------- 4.3 OpenTelemetry ----------
+- id: m-otel-init
+  objective: "4.3"
+  type: single
+  difficulty: 1
+  tags: [opentelemetry, azure-monitor, python]
+  question: |
+    Python の Web API を OpenTelemetry で計装し、Application Insights に送りたいと考えています。Azure Monitor OpenTelemetry Distro を使う場合の最小限の構成はどれですか。
+  options:
+    - "`pip install azure-monitor-opentelemetry` し、環境変数 `APPLICATIONINSIGHTS_CONNECTION_STRING` を設定して、起動時に `configure_azure_monitor()` を呼ぶ"
+    - "Application Insights のインストルメンテーション キーをコードの各所で `TelemetryClient` に渡す"
+    - "Log Analytics ワークスペースの共有キーを環境変数に設定する"
+    - "OpenTelemetry Collector を必ず別途デプロイする"
+  answer: A
+  explanation: |
+    Azure Monitor OpenTelemetry Distro は `configure_azure_monitor()` で、トレース・メトリック・ログのエクスポートと主要ライブラリの自動計装を構成します。接続先は**接続文字列**で指定します。
+    （2026 年には新しい Microsoft OpenTelemetry Distro（`use_microsoft_opentelemetry()`）も登場しています。同じアプリで両方を初期化しないこと。）
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable
+    - https://learn.microsoft.com/python/api/overview/azure/monitor-opentelemetry-readme
+
+- id: m-otel-table-match
+  objective: "4.3"
+  type: match
+  difficulty: 2
+  tags: [opentelemetry, application-insights]
+  question: |
+    OpenTelemetry のテレメトリが、Application Insights のどのテーブル（クラシック名）に入るかを対応付けてください。
+  pairs:
+    - left: "SpanKind が SERVER のスパン（受信した HTTP リクエスト）"
+      right: "requests"
+    - left: "SpanKind が CLIENT のスパン（DB や LLM の呼び出し）"
+      right: "dependencies"
+    - left: "スパンに `record_exception()` で記録した例外"
+      right: "exceptions"
+    - left: "Python の logging で出力したログ"
+      right: "traces"
+  distractors:
+    - "customEvents"
+  explanation: |
+    SERVER / CONSUMER スパンは requests、CLIENT / PRODUCER / INTERNAL スパンは dependencies、例外は exceptions、ログは traces、メトリックは customMetrics に入ります。
+    ワークスペースのテーブル名では AppRequests、AppDependencies、AppExceptions、AppTraces です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+
+- id: m-otel-span-code
+  objective: "4.3"
+  type: dropdown
+  difficulty: 2
+  tags: [opentelemetry, python, span]
+  question: |
+    RAG の検索処理の時間を測り、取得件数を記録し、失敗時は例外とエラー状態を記録するコードを完成させてください。
+  language: python
+  template: |
+    tracer = trace.get_tracer(__name__)
+
+    def retrieve(question: str):
+        with tracer.{{1}}("rag.retrieve") as span:
+            try:
+                docs = search(question)
+                span.{{2}}("rag.top_k", len(docs))
+                return docs
+            except Exception as ex:
+                span.{{3}}(ex)
+                span.set_status(Status(StatusCode.{{4}}))
+                raise
+  blanks:
+    "1": {options: [start_as_current_span, get_current_span, start_trace], answer: start_as_current_span}
+    "2": {options: [set_attribute, add_event, set_tag], answer: set_attribute}
+    "3": {options: [record_exception, add_exception, log_error], answer: record_exception}
+    "4": {options: [ERROR, OK, UNSET], answer: ERROR}
+  explanation: |
+    `start_as_current_span` で現在のコンテキストに子スパンを作り、`set_attribute` で属性、`record_exception` で例外、`set_status(StatusCode.ERROR)` でエラー状態を記録します。
+    .NET では `ActivitySource.StartActivity()` と `SetTag()` が対応します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify
+    - https://opentelemetry.io/docs/languages/python/instrumentation/
+
+- id: m-otel-rolename-sampling
+  objective: "4.3"
+  type: yesno
+  difficulty: 3
+  tags: [opentelemetry, sampling, application-map]
+  question: |
+    OpenTelemetry と Application Insights について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "リソース属性 `service.name` は、Application Insights の `cloud_RoleName`（アプリケーション マップのノード名）になる。"
+      answer: true
+    - text: "Azure Monitor のディストロの既定のサンプリングは、レート制限で 1 秒あたり 5 トレースである。"
+      answer: true
+    - text: "サンプリングはメトリックにも適用されるため、メトリックの値も間引かれる。"
+      answer: false
+    - text: "サービス間のトレースは、HTTP では W3C Trace Context の `traceparent` ヘッダーで引き継がれる。"
+      answer: true
+  explanation: |
+    サンプリングが適用されるのは**トレース（スパン）**で、メトリックはサンプリングされません。そのためアラートはメトリックに設定するのが確実です。
+    Python では `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` でサンプラーを設定します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-sampling
+
+# ---------- 4.4 KQL ----------
+- id: m-kql-p95
+  objective: "4.4"
+  type: dropdown
+  difficulty: 2
+  tags: [kql, application-insights]
+  question: |
+    直近 24 時間の、5 分ごとの p95 応答時間を時系列グラフにする KQL を完成させてください。
+  language: kusto
+  template: |
+    requests
+    | where timestamp > {{1}}(24h)
+    | summarize p95 = {{2}}(duration, 95) by {{3}}(timestamp, 5m)
+    | render {{4}}
+  blanks:
+    "1": {options: [ago, now, datetime], answer: ago}
+    "2": {options: [percentile, avg, max], answer: percentile}
+    "3": {options: [bin, floor, range], answer: bin}
+    "4": {options: [timechart, piechart, table], answer: timechart}
+  explanation: |
+    `ago(24h)` で相対時刻、`percentile(列, 95)` で 95 パーセンタイル、`bin(timestamp, 5m)` で 5 分ごとに集計し、`render timechart` で時系列グラフにします。
+  refs:
+    - https://learn.microsoft.com/kusto/query/percentiles-aggregation-function
+    - https://learn.microsoft.com/kusto/query/bin-function
+
+- id: m-kql-join
+  objective: "4.4"
+  type: single
+  difficulty: 2
+  tags: [kql, join]
+  question: |
+    失敗したリクエストと、そのリクエストの処理中に発生した例外を 1 つの結果にまとめたいと考えています。Application Insights のクラシック テーブルで、結合に使う列はどれですか。
+  options:
+    - "`operation_Id`"
+    - "`timestamp`"
+    - "`cloud_RoleInstance`"
+    - "`itemCount`"
+  answer: A
+  explanation: |
+    `operation_Id` はトレース ID で、同じ処理に属するリクエスト・依存関係・例外・ログをつなぎます。
+    例: `requests | where success == false | join kind=inner (exceptions) on operation_Id`。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/data-model-complete
+
+- id: m-kql-order
+  objective: "4.4"
+  type: order
+  difficulty: 2
+  tags: [kql]
+  question: |
+    「直近 1 時間で、p95 応答時間が 2 秒を超える操作を、遅い順に表示する」KQL を作ります。パイプでつなぐ順に並べてください（先頭は `requests`）。
+  items:
+    - "requests"
+    - "| where timestamp > ago(1h)"
+    - "| summarize p95 = percentile(duration, 95) by name"
+    - "| where p95 > 2000"
+    - "| order by p95 desc"
+  distractors:
+    - "| render piechart"
+  explanation: |
+    まず時間で絞り込み、操作名ごとに集計してから、集計結果（`p95`）で絞り込み、並べ替えます。`duration` の単位はミリ秒です。
+    集計前に `p95` で絞ることはできません（まだ列が存在しないため）。
+  refs:
+    - https://learn.microsoft.com/kusto/query/summarize-operator
+
+- id: m-kql-workspace-names
+  objective: "4.4"
+  type: single
+  difficulty: 3
+  tags: [kql, log-analytics]
+  question: |
+    Application Insights（ワークスペース ベース）のデータを、Log Analytics ワークスペースから直接クエリします。クラシックの `requests | where timestamp > ago(1h) | summarize avg(duration)` と同じ意味のクエリはどれですか。
+  options:
+    - "`requests | where TimeGenerated > ago(1h) | summarize avg(duration)`"
+    - "`AppRequests | where TimeGenerated > ago(1h) | summarize avg(DurationMs)`"
+    - "`AppRequests | where timestamp > ago(1h) | summarize avg(duration)`"
+    - "`AzureDiagnostics | where Category == \"requests\" | summarize avg(duration)`"
+  answer: B
+  explanation: |
+    ワークスペースではテーブル名と列名が異なります: `requests` → `AppRequests`、`timestamp` → `TimeGenerated`、`duration` → `DurationMs`、`operation_Id` → `OperationId`、`cloud_RoleName` → `AppRoleName`。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/convert-classic-resource

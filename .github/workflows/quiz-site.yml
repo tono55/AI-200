@@ -1,0 +1,63 @@
+name: Quiz site
+
+# 問題（questions/*.yml）を検証してサイトを生成し、デフォルト ブランチなら GitHub Pages に公開する。
+# 初回だけ、リポジトリの Settings → Pages → Build and deployment → Source を「GitHub Actions」にする。
+
+on:
+  push:
+    paths:
+      - "questions/**"
+      - "site/**"
+      - "scripts/build_questions.py"
+      - ".github/workflows/quiz-site.yml"
+  pull_request:
+    paths:
+      - "questions/**"
+      - "site/**"
+      - "scripts/build_questions.py"
+      - ".github/workflows/quiz-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quiz-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml==6.0.2
+
+      - name: Validate questions and build data
+        run: python scripts/build_questions.py
+
+      - name: Check JavaScript syntax
+        run: node --check site/assets/app.js
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

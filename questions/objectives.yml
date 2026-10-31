@@ -1,0 +1,168 @@
+# AI-200 の公式出題範囲（Skills measured as of October 7, 2026）
+# 問題（questions/*.yml）の objective はここの id を参照する。
+# min_questions: 網羅チェックで要求する最低問題数（scripts/build_questions.py が検証）
+
+min_questions: 3
+
+domains:
+  - id: "1"
+    title_en: Develop containerized solutions on Azure
+    title_ja: Azure でコンテナー化されたソリューションを開発する
+    weight: [20, 25]
+    note: docs/domains/1-containers.md
+  - id: "2"
+    title_en: Develop AI solutions by using Azure data management services
+    title_ja: Azure データ管理サービスを使用して AI ソリューションを開発する
+    weight: [25, 30]
+    note: docs/domains/2a-cosmos-db.md
+  - id: "3"
+    title_en: Connect to and consume Azure services
+    title_ja: Azure サービスに接続して使用する
+    weight: [20, 25]
+    note: docs/domains/3-azure-services.md
+  - id: "4"
+    title_en: Secure, monitor, and troubleshoot Azure solutions
+    title_ja: Azure ソリューションのセキュリティ保護、監視、トラブルシューティング
+    weight: [20, 25]
+    note: docs/domains/4-secure-monitor.md
+
+objectives:
+  # 分野 1
+  - id: "1.1"
+    domain: "1"
+    title_en: Build, store, version, and manage container images by using Azure Container Registry
+    title_ja: ACR でコンテナー イメージをビルド・保存・バージョン管理・管理する
+    note: docs/domains/1-containers.md
+  - id: "1.2"
+    domain: "1"
+    title_en: Build and run images by using Azure Container Registry Tasks
+    title_ja: ACR Tasks でイメージをビルド・実行する
+    note: docs/domains/1-containers.md
+  - id: "1.3"
+    domain: "1"
+    title_en: Deploy containers to Azure App Service, including configuring App Service to supply environment variables and secrets
+    title_ja: App Service にコンテナーをデプロイする（環境変数とシークレットの受け渡し）
+    note: docs/domains/1-containers.md
+  - id: "1.4"
+    domain: "1"
+    title_en: Deploy applications to Azure Container Apps, including environment configuration and revision management
+    title_ja: Container Apps にデプロイする（環境構成とリビジョン管理）
+    note: docs/domains/1-containers.md
+  - id: "1.5"
+    domain: "1"
+    title_en: Implement event-driven scaling by using KEDA in Container Apps
+    title_ja: Container Apps で KEDA によるイベント ドリブン スケーリングを実装する
+    note: docs/domains/1-containers.md
+  - id: "1.6"
+    domain: "1"
+    title_en: Deploy and manage applications to AKS by using manifest files
+    title_ja: マニフェスト ファイルで AKS にデプロイ・管理する
+    note: docs/domains/1-containers.md
+  - id: "1.7"
+    domain: "1"
+    title_en: Monitor and troubleshoot solutions on AKS and Container Apps by inspecting logs, events, and end-to-end connectivity
+    title_ja: ログ・イベント・接続性から AKS と Container Apps を監視・トラブルシューティングする
+    note: docs/domains/1-containers.md
+  # 分野 2
+  - id: "2.1"
+    domain: "2"
+    title_en: Connect to Azure Cosmos DB for NoSQL by using the SDK and run queries
+    title_ja: SDK で Cosmos DB for NoSQL に接続しクエリを実行する
+    note: docs/domains/2a-cosmos-db.md
+  - id: "2.2"
+    domain: "2"
+    title_en: Optimize query performance and RU consumption by using indexing policies and consistency levels
+    title_ja: インデックス作成ポリシーと整合性レベルで性能と RU を最適化する
+    note: docs/domains/2a-cosmos-db.md
+  - id: "2.3"
+    domain: "2"
+    title_en: Store and retrieve embeddings and execute vector similarity search for semantic retrieval
+    title_ja: 埋め込みを格納・取得し、ベクター類似性検索を実行する
+    note: docs/domains/2a-cosmos-db.md
+  - id: "2.4"
+    domain: "2"
+    title_en: Implement a change feed processor to detect and handle new or updated items
+    title_ja: 変更フィード プロセッサで新規・更新項目を処理する
+    note: docs/domains/2a-cosmos-db.md
+  - id: "2.5"
+    domain: "2"
+    title_en: Connect and query Azure Database for PostgreSQL by using SDKs
+    title_ja: SDK で Azure Database for PostgreSQL に接続しクエリを実行する
+    note: docs/domains/2b-postgresql-pgvector.md
+  - id: "2.6"
+    domain: "2"
+    title_en: Model schemas and implement indexing strategies, including designing tables and choosing appropriate data types
+    title_ja: スキーマをモデル化する（テーブル設計・データ型の選択）
+    note: docs/domains/2b-postgresql-pgvector.md
+  - id: "2.7"
+    domain: "2"
+    title_en: Implement indexing strategies, including optimizing query latency and reducing pgvector compute overhead
+    title_ja: インデックス作成戦略を実装する（遅延の最適化、pgvector の計算負荷の削減）
+    note: docs/domains/2b-postgresql-pgvector.md
+  - id: "2.8"
+    domain: "2"
+    title_en: Configure compute, memory, and storage resources to support vector workloads
+    title_ja: ベクター ワークロード向けにコンピューティング・メモリ・ストレージを構成する
+    note: docs/domains/2b-postgresql-pgvector.md
+  - id: "2.9"
+    domain: "2"
+    title_en: Run vector similarity search, including storing embeddings, semantic retrieval, and implementing RAG patterns by using metadata filter
+    title_ja: ベクター類似性検索を実行する（メタデータ フィルターを使った RAG）
+    note: docs/domains/2b-postgresql-pgvector.md
+  - id: "2.10"
+    domain: "2"
+    title_en: Implement connection optimization to improve throughput and minimize latency
+    title_ja: 接続を最適化してスループットを上げ遅延を減らす
+    note: docs/domains/2b-postgresql-pgvector.md
+  - id: "2.11"
+    domain: "2"
+    title_en: Implement Azure Managed Redis data operations, including caching, expiration, and invalidation
+    title_ja: Azure Managed Redis のデータ操作（キャッシュ、有効期限、無効化）
+    note: docs/domains/2c-managed-redis.md
+  - id: "2.12"
+    domain: "2"
+    title_en: Implement vector indexing to enable similarity search
+    title_ja: ベクトル インデックスを実装して類似性検索を有効にする
+    note: docs/domains/2c-managed-redis.md
+  # 分野 3
+  - id: "3.1"
+    domain: "3"
+    title_en: Queue and process back-end operations by using Azure Service Bus, including dead-letter queue handling, messages, topics, and subscriptions
+    title_ja: Service Bus でバックエンド処理をキューイング・処理する（DLQ、トピック、サブスクリプション）
+    note: docs/domains/3-azure-services.md
+  - id: "3.2"
+    domain: "3"
+    title_en: Implement event-driven workflows by using Azure Event Grid, including filters, custom events, and retries
+    title_ja: Event Grid でイベント ドリブン ワークフローを実装する（フィルター、カスタム イベント、再試行）
+    note: docs/domains/3-azure-services.md
+  - id: "3.3"
+    domain: "3"
+    title_en: Build serverless APIs, including implementing triggers and bindings
+    title_ja: サーバーレス API を構築する（トリガーとバインド）
+    note: docs/domains/3-azure-services.md
+  - id: "3.4"
+    domain: "3"
+    title_en: Configure and deploy function apps
+    title_ja: 関数アプリの構成とデプロイ
+    note: docs/domains/3-azure-services.md
+  # 分野 4
+  - id: "4.1"
+    domain: "4"
+    title_en: Secure secrets by using Azure Key Vault, including rotation and retrieval
+    title_ja: Key Vault でシークレットを保護する（ローテーションと取得）
+    note: docs/domains/4-secure-monitor.md
+  - id: "4.2"
+    domain: "4"
+    title_en: Store and retrieve app configuration information by using Azure App Configuration
+    title_ja: App Configuration で構成情報を格納・取得する
+    note: docs/domains/4-secure-monitor.md
+  - id: "4.3"
+    domain: "4"
+    title_en: Trace distributed systems by using OpenTelemetry SDKs
+    title_ja: OpenTelemetry SDK で分散システムをトレースする
+    note: docs/domains/4-secure-monitor.md
+  - id: "4.4"
+    domain: "4"
+    title_en: Write KQL queries to analyze logs and metrics
+    title_ja: ログとメトリックを分析する KQL を記述する
+    note: docs/domains/4-secure-monitor.md
