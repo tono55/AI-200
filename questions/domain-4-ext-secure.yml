@@ -1,0 +1,447 @@
+# 分野 4 追加問題: Key Vault（4.1）と App Configuration（4.2）
+
+# ---------- 4.1 ----------
+- id: m-kv-secret-scope
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, rbac, least-privilege]
+  question: |
+    1 つのボールトに 30 個のシークレットがあります。新しい推論ワーカーには、そのうち `openai-key` だけを読ませたいです。最小権限を満たす方法として最も適切なものはどれですか（ボールトは Azure RBAC モデル）。
+  options:
+    - "ワーカーのマネージド ID に、シークレット `openai-key` のスコープで Key Vault Secrets User を割り当てる"
+    - "ボールト全体のスコープで Key Vault Secrets User を割り当てる"
+    - "ボールトのアクセス ポリシーでシークレットの Get を許可する"
+    - "Key Vault Reader を割り当てる"
+  answer: A
+  explanation: |
+    Azure RBAC モデルでは、ボールトだけでなく**個々のシークレット**のスコープでロールを割り当てられます。アクセス ポリシーはボールト単位の権限で、特定のシークレットだけに絞れません。Key Vault Reader は値を読めません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+
+- id: m-kv-pinned-version
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, versioning, rotation]
+  question: |
+    ローテーション用の関数は正しく新しいバージョンを作っているのに、アプリはいつまでも古いパスワードを使い続け、旧パスワードの無効化後にエラーになりました。アプリは `https://kv.vault.azure.net/secrets/db-pass/7f3a...` から値を取得しています。原因はどれですか。
+  options:
+    - "URI にバージョンが含まれているため、常にその古いバージョンを取得している"
+    - "Key Vault のソフト削除が有効になっている"
+    - "シークレットに有効期限が設定されている"
+    - "アプリの ID に Key Vault Reader が付いている"
+  answer: A
+  explanation: |
+    バージョン付きの URI は特定のバージョンに固定されます。ローテーションに追従するには、バージョンなしの URI（またはシークレット名）で最新を取得し、キャッシュの TTL ごとに読み直します。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/about-keys-secrets-certificates
+    - https://learn.microsoft.com/azure/key-vault/secrets/tutorial-rotation
+
+- id: m-kv-dual-credential
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, rotation, dual-credential]
+  question: |
+    ストレージ アカウントのアクセス キーを Key Vault で定期的にローテーションします。キーを再生成した瞬間に、古いキーを使っているアプリのリクエストが失敗するのを避けたいです。最も適切な方式はどれですか。
+  options:
+    - "2 組の資格情報（key1 / key2）を交互に使い、使っていない方を再生成して Key Vault に保存し、アプリが切り替わってから次回もう一方を再生成する"
+    - "毎回 key1 を再生成し、アプリを即座に再起動する"
+    - "ローテーションをやめて、キーを無期限に使う"
+    - "キーをアプリ設定に平文で保存する"
+  answer: A
+  explanation: |
+    **2 組の資格情報**を使うローテーションでは、アプリが使っていない方のキーを再生成するため、切り替え中もアプリは有効なキーで動けます。1 組しかない資格情報では、更新と反映の間にずれが生じえます。
+    （可能ならマネージド ID と RBAC を使い、キー自体を不要にするのが最善です。）
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/secrets/tutorial-rotation-dual
+
+- id: m-kv-key-rotation-policy
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, keys, rotation]
+  question: |
+    Storage と Cosmos DB のカスタマー マネージド キー（CMK）に使う Key Vault の**キー**を、1 年ごとに自動でローテーションしたいです。最も適切な方法はどれですか。
+  options:
+    - "キーのローテーション ポリシー（有効期限や作成からの日数で新しいバージョンを作る）を設定し、各サービスにはバージョンなしのキー URI を設定する"
+    - "Event Grid と Azure Functions で新しいキーを作る関数を書く"
+    - "キーを毎年手動で削除して作り直す"
+    - "キーをシークレットとして保存する"
+  answer: A
+  explanation: |
+    **キー**は Key Vault のローテーション ポリシーで自動ローテーションできます（シークレットは相手先の資格情報の変更が必要なので、関数などで自動化）。CMK を使うサービスにバージョンなしの URI を設定すると、新しいバージョンに自動で追従します。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/keys/how-to-configure-key-rotation
+    - https://learn.microsoft.com/azure/key-vault/general/autorotation
+
+- id: m-kv-private-endpoint
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, network, private-endpoint]
+  question: |
+    Key Vault のパブリック アクセスを無効にし、プライベート エンドポイントを作成しました。VNet 統合した Container Apps から `kv-prod.vault.azure.net` にアクセスすると、まだパブリック IP に名前解決されて接続できません。最も可能性の高い原因はどれですか。
+  options:
+    - "プライベート DNS ゾーン `privatelink.vaultcore.azure.net` が Container Apps の VNet にリンクされていない（またはレコードがない）"
+    - "Key Vault のソフト削除が有効になっている"
+    - "アプリの ID に Key Vault Secrets Officer が必要"
+    - "Key Vault を Premium にする必要がある"
+  answer: A
+  explanation: |
+    プライベート エンドポイントを使うには、ボールト名がプライベート IP に解決される必要があります。プライベート DNS ゾーン（`privatelink.vaultcore.azure.net`）を作成して VNet にリンクするのが一般的です。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/private-link-service
+
+- id: m-kv-recover-conflict
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, soft-delete]
+  question: |
+    誤って削除したシークレット `db-pass` を、同じ名前で作り直そうとすると「論理的に削除された状態のシークレットがあるため作成できない」というエラーになります。ボールトでは消去保護が有効です。最も適切な対処はどれですか。
+  options:
+    - "`az keyvault secret recover` で削除済みのシークレットを復元する（すべてのバージョンが戻る）"
+    - "`az keyvault secret purge` で完全消去してから作り直す"
+    - "ボールトの消去保護を無効にしてから消去する"
+    - "保持期間を 0 日に変更する"
+  answer: A
+  explanation: |
+    論理的に削除されたシークレットは保持期間中、同じ名前で作成できません。復元（recover）すれば元のシークレットとバージョンが戻ります。消去保護が有効なボールトでは保持期間中の完全消去はできず、消去保護も無効化できません。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/key-vault-recovery
+
+- id: m-kv-multiple-uami
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, managed-identity, default-azure-credential]
+  question: |
+    Container Apps に 2 つのユーザー割り当てマネージド ID（ストレージ用と Key Vault 用）を割り当てました。コードの `DefaultAzureCredential()` で Key Vault にアクセスすると 403 になります。Key Vault 用の ID にはロールを付与済みです。最も適切な修正はどれですか。
+  options:
+    - "使う ID のクライアント ID を指定する（`DefaultAzureCredential(managed_identity_client_id=...)` や環境変数 `AZURE_CLIENT_ID`）"
+    - "システム割り当て ID を追加で有効にする"
+    - "Key Vault のアクセス ポリシーに両方の ID を追加する"
+    - "Key Vault を再作成する"
+  answer: A
+  explanation: |
+    複数のユーザー割り当て ID がある場合、どの ID でトークンを取るかを指定しないと、意図しない ID（権限のない方）が使われることがあります。クライアント ID を指定します。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/managed-identity
+    - https://learn.microsoft.com/python/api/overview/azure/identity-readme
+
+- id: m-kv-newversion-event
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, event-grid, cache]
+  question: |
+    アプリはシークレットを 1 時間キャッシュしています。ローテーションで新しいバージョンができたら、1 時間待たずにすぐキャッシュを更新したいです。最も適切な方法はどれですか。
+  options:
+    - "Key Vault の `Microsoft.KeyVault.SecretNewVersionCreated` イベントを Event Grid で受け取り、アプリのキャッシュを無効化（再読み込み）する"
+    - "キャッシュをやめて、リクエストごとに Key Vault を読む"
+    - "シークレットの有効期限を 1 時間にする"
+    - "Key Vault を 2 つ作る"
+  answer: A
+  explanation: |
+    Key Vault は新しいバージョンの作成、期限切れ間近、期限切れなどのイベントを Event Grid に発行します。イベントでキャッシュを更新すれば、Key Vault への呼び出しを抑えつつ素早く追従できます。リクエストごとの読み取りはスロットリングの原因になります。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/event-grid-overview
+
+- id: m-kv-vault-per-env
+  objective: "4.1"
+  type: single
+  difficulty: 2
+  tags: [key-vault, design]
+  question: |
+    dev / staging / prod の 3 環境と、5 つのアプリがあります。Key Vault の分け方として推奨されるものはどれですか。
+  options:
+    - "アプリごと・環境ごとにボールトを分ける（影響範囲とアクセス権を分離し、スロットリングも分散する）"
+    - "全アプリ・全環境で 1 つのボールトを共有する"
+    - "環境は分けず、シークレット名に環境名を付けて区別する"
+    - "ボールトは使わず、各アプリの設定に保存する"
+  answer: A
+  explanation: |
+    Key Vault のベスト プラクティスは、アプリケーションごと・環境ごと（・リージョンごと）にボールトを分けることです。誤って本番のシークレットを開発環境から読む事故を防ぎ、アクセス制御やスロットリングの上限も分離できます。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/best-practices
+
+- id: m-kv-certificate-renewal
+  objective: "4.1"
+  type: single
+  difficulty: 3
+  tags: [key-vault, certificates]
+  question: |
+    外部 API との相互 TLS に使うクライアント証明書を Key Vault で管理しています。証明書は Key Vault と統合された公的な CA で発行しています。期限切れによる障害を防ぐ最も適切な方法はどれですか。
+  options:
+    - "証明書のポリシーで有効期限前の自動更新（ライフタイム アクション）を設定し、利用側はバージョンなしで最新の証明書を取得する"
+    - "期限の 1 日前に手動で更新する"
+    - "有効期限のない証明書を作る"
+    - "証明書をシークレットとして手動でアップロードし直す"
+  answer: A
+  explanation: |
+    統合された CA で発行した証明書は、ポリシーのライフタイム アクションで期限前に自動更新できます（期限前の通知も設定可能）。利用側は最新のバージョンを取得するようにします。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/certificates/overview-renew-certificate
+    - https://learn.microsoft.com/azure/key-vault/certificates/tutorial-rotate-certificates
+
+- id: m-kv-facts
+  objective: "4.1"
+  type: yesno
+  difficulty: 3
+  tags: [key-vault]
+  question: |
+    Azure Key Vault について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "シークレットに有効期限（expires）を設定しても、期限後に Key Vault が値を自動で変更することはない。"
+      answer: true
+    - text: "ボールトの名前はグローバルに一意で、論理的に削除されたボールトの名前は保持期間が終わるまで再利用できない。"
+      answer: true
+    - text: "Key Vault Secrets Officer は、シークレットの値を読むことはできない。"
+      answer: false
+    - text: "1 つのボールトから大量にシークレットを読むと、スロットリング（429）が発生することがある。"
+      answer: true
+  explanation: |
+    有効期限は属性で、期限が来ても値は変わりません（期限切れ間近のイベントでローテーションを自動化する）。Secrets Officer はシークレットの管理（作成・削除）に加えて値の読み取りもできます。アプリには読み取りだけの Secrets User を使います。
+  refs:
+    - https://learn.microsoft.com/azure/key-vault/general/rbac-guide
+    - https://learn.microsoft.com/azure/key-vault/general/overview-throttling
+
+- id: m-kv-retrieval-code
+  objective: "4.1"
+  type: dropdown
+  difficulty: 2
+  tags: [key-vault, python]
+  question: |
+    マネージド ID で Key Vault からシークレットの最新値を取得するコードを完成させてください。
+  language: python
+  template: |
+    from azure.identity import {{1}}
+    from azure.keyvault.secrets import {{2}}
+
+    client = {{2}}(vault_url="https://kv-ai200.vault.azure.net/", credential={{1}}())
+    api_key = client.{{3}}("openai-key").value
+  blanks:
+    "1": {options: [DefaultAzureCredential, AzureKeyCredential, ClientSecretCredential], answer: DefaultAzureCredential}
+    "2": {options: [SecretClient, KeyClient, CertificateClient], answer: SecretClient}
+    "3": {options: [get_secret, set_secret, list_properties_of_secrets], answer: get_secret}
+  explanation: |
+    シークレットは `SecretClient`、キーは `KeyClient`、証明書は `CertificateClient` で扱います。`get_secret(name)` はバージョンを省略すると最新を返します。`list_properties_of_secrets` は値を含まないメタデータの一覧です。
+  refs:
+    - https://learn.microsoft.com/python/api/overview/azure/keyvault-secrets-readme
+
+# ---------- 4.2 ----------
+- id: m-appcfg-label-fallback
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, labels]
+  question: |
+    App Configuration に、共通の値はラベルなし、本番だけ違う値はラベル `prod` で登録しています。本番のアプリでは「共通の値を読み込み、`prod` の値があればそれで上書き」したいです。Python プロバイダーの `selects` として正しいものはどれですか。
+  options:
+    - "`[SettingSelector(key_filter=\"*\", label_filter=\"\\0\"), SettingSelector(key_filter=\"*\", label_filter=\"prod\")]`（後のセレクターが優先される）"
+    - "`[SettingSelector(key_filter=\"*\", label_filter=\"prod\"), SettingSelector(key_filter=\"*\", label_filter=\"\\0\")]`"
+    - "`[SettingSelector(key_filter=\"*\", label_filter=\"*\")]`"
+    - "`[SettingSelector(key_filter=\"prod\")]`"
+  answer: A
+  explanation: |
+    ラベルなし（null ラベル）は `\0` で指定します。複数のセレクターで同じキーが読み込まれた場合、**後に指定したセレクター**の値が優先されるため、共通 → 環境固有の順に並べます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-labels-aspnet-core
+    - https://learn.microsoft.com/azure/azure-app-configuration/quickstart-python-provider
+
+- id: m-appcfg-targeting
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, feature-flags]
+  question: |
+    新しいハイブリッド検索を、まず社内のベータ テスター グループ全員と、一般ユーザーの 5% にだけ公開したいです。コードのデプロイなしで割合を変えられるようにしたいです。最も適切な方法はどれですか。
+  options:
+    - "App Configuration の機能フラグにターゲット フィルター（グループ: beta-testers 100%、既定の割合 5%）を設定し、アプリは機能管理ライブラリで評価する"
+    - "環境変数で割合を設定し、変更のたびに再デプロイする"
+    - "Key Vault に割合を保存する"
+    - "Container Apps のトラフィック分割で 5% を新リビジョンに送る"
+  answer: A
+  explanation: |
+    機能フラグの**ターゲット フィルター**は、特定のユーザー・グループと、それ以外の割合を指定できます。同じユーザーには一貫した結果になります。トラフィック分割はリクエスト単位でユーザーを固定できず、機能単位の制御にも向きません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-targetingfilter
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-feature-management
+
+- id: m-appcfg-snapshot-load
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, snapshots]
+  question: |
+    リリースごとに構成を固定し、問題があれば前のリリースの構成に即座に戻したいです。リリース中に誰かがキーと値を変更しても、そのリリースのアプリには影響させたくありません。最も適切な方法はどれですか。
+  options:
+    - "リリース時にスナップショットを作成し、アプリはそのスナップショット名を指定して構成を読み込む。戻すときは前のスナップショット名に切り替える"
+    - "ラベルにリリース番号を付け、毎回すべてのキーをコピーする"
+    - "構成をコンテナー イメージに埋め込む"
+    - "リフレッシュ間隔を 0 にする"
+  answer: A
+  explanation: |
+    **スナップショット**は作成時点のキーと値の組み合わせを変更不可で保存します。アプリがスナップショットを読み込めば、ストアのキーと値が変更されても影響を受けず、名前を切り替えるだけでロールバックできます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-snapshots
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-create-snapshots
+
+- id: m-appcfg-push-refresh
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, event-grid, refresh]
+  question: |
+    数百のアプリ インスタンスが 30 秒ごとにセンチネル キーをポーリングしており、App Configuration のリクエスト数が多くなっています。変更はめったにありませんが、変更したら素早く反映したいです。最も適切な方法はどれですか。
+  options:
+    - "App Configuration のキー値変更イベント（`KeyValueModified`）を Event Grid → Service Bus などで受け取り、受け取ったときにリフレッシュする（プッシュ型）。ポーリング間隔は長くする"
+    - "リフレッシュ間隔を 1 秒にする"
+    - "センチネル キーを廃止し、すべてのキーを監視する"
+    - "各インスタンスで構成を読み込まないようにする"
+  answer: A
+  explanation: |
+    App Configuration はキーと値の変更を Event Grid に発行します。イベントを受けてリフレッシュする**プッシュ型**にすると、ポーリングの回数を減らしつつ素早く反映できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/enable-dynamic-configuration-azure-functions-csharp
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-app-configuration-event
+
+- id: m-appcfg-free-quota
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, tiers]
+  question: |
+    検証で使っていた Free 層の App Configuration を本番でもそのまま使っていたところ、日中に要求が拒否されるようになりました。最も適切な対処はどれですか。
+  options:
+    - "Standard（または Premium）層に変更する。リフレッシュ間隔やキャッシュも見直してリクエスト数を抑える"
+    - "キーの数を減らす"
+    - "ラベルをすべて削除する"
+    - "Key Vault 参照をやめる"
+  answer: A
+  explanation: |
+    Free 層には 1 日あたりの要求数やストレージに制限があり、SLA もありません。本番では Standard 以上を使います。多数のインスタンスが短い間隔でリフレッシュすると要求数が増えるため、センチネル キーやプッシュ型の更新も検討します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/faq
+
+- id: m-appcfg-trim-prefix
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, keys]
+  question: |
+    ストアのキーは `RagApi:Search:TopK` のようにアプリ名のプレフィックス付きで登録されています。アプリのコードでは `config["Search:TopK"]` のように、プレフィックスなしで読みたいです。Python プロバイダーで何を指定しますか。
+  options:
+    - "`selects` で `RagApi:*` に絞り、`trim_prefixes=[\"RagApi:\"]` を指定する"
+    - "キーをすべてプレフィックスなしで登録し直す"
+    - "ラベルに `RagApi` を指定する"
+    - "コードで毎回文字列を連結する"
+  answer: A
+  explanation: |
+    共有ストアでは、アプリや機能ごとにキーのプレフィックスで名前空間を分けるのが一般的です。`trim_prefixes` で読み込み時にプレフィックスを取り除けます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/reference-python-provider
+
+- id: m-appcfg-roles-match
+  objective: "4.2"
+  type: match
+  difficulty: 2
+  tags: [app-configuration, rbac]
+  question: |
+    App Configuration へのアクセスで、利用者に割り当てるべき組み込みロールを対応付けてください。
+  pairs:
+    - left: "構成を読み込むだけのアプリのマネージド ID"
+      right: "App Configuration Data Reader"
+    - left: "CI/CD から構成値をインポート・更新するパイプライン"
+      right: "App Configuration Data Owner"
+    - left: "ストアのリソース自体（SKU、ネットワーク）を管理する運用者"
+      right: "Contributor（コントロール プレーン）"
+  distractors:
+    - "Key Vault Secrets User"
+  explanation: |
+    データ（キーと値）の読み書きにはデータ プレーンのロール（Data Reader / Data Owner）、リソースの管理には Contributor などのコントロール プレーンのロールを使います。Key Vault 参照を解決するには、別途 Key Vault のロールも必要です。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-enable-rbac
+
+- id: m-appcfg-import-ci
+  objective: "4.2"
+  type: single
+  difficulty: 2
+  tags: [app-configuration, ci-cd]
+  question: |
+    リポジトリの `config/prod.json` を正として管理し、デプロイ時に App Configuration の `prod` ラベルの値へ反映したいです。CLI で最も適切な方法はどれですか。
+  options:
+    - "`az appconfig kv import --source file --path config/prod.json --format json --label prod`"
+    - "`az appconfig kv set` をキーの数だけ手で実行する"
+    - "`az keyvault secret set` で保存する"
+    - "`az appconfig snapshot create` だけを実行する"
+  answer: A
+  explanation: |
+    `az appconfig kv import` はファイル（JSON / YAML / properties）や他のストアからキーと値を一括で取り込めます。ラベルやプレフィックス、区切り文字も指定できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/howto-import-export-data
+    - https://learn.microsoft.com/cli/azure/appconfig/kv
+
+- id: m-appcfg-georeplica
+  objective: "4.2"
+  type: single
+  difficulty: 3
+  tags: [app-configuration, resiliency]
+  question: |
+    App Configuration のリージョン障害時にも、別リージョンで動くアプリが構成を読み込めるようにしたいです。最も適切な機能はどれですか。
+  options:
+    - "geo レプリケーションでレプリカを別リージョンに作り、プロバイダーのレプリカ探索 / フェールオーバーを使う"
+    - "Free 層を 2 つ作る"
+    - "スナップショットを作る"
+    - "ラベルを 2 つ使う"
+  answer: A
+  explanation: |
+    App Configuration の **geo レプリケーション**（Standard 以上）は、ストアのレプリカを他のリージョンに作ります。公式プロバイダーはレプリカを自動で探索し、障害時に切り替えられます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-geo-replication
+
+- id: m-appcfg-refresh-facts
+  objective: "4.2"
+  type: yesno
+  difficulty: 3
+  tags: [app-configuration, refresh]
+  question: |
+    App Configuration の動的リフレッシュについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "リフレッシュ間隔（既定 30 秒）が過ぎていなければ、`refresh()` を呼んでもストアへの要求は行われない。"
+      answer: true
+    - text: "センチネル キーだけを監視する構成では、センチネル以外のキーを変更しても、センチネルを変えるまでアプリには反映されない。"
+      answer: true
+    - text: "リフレッシュで構成が更新されると、Key Vault 参照の値も再解決される。"
+      answer: true
+    - text: "スナップショットから読み込んだ構成も、ストアのキーと値を変更すれば自動でリフレッシュされる。"
+      answer: false
+  explanation: |
+    リフレッシュ間隔はストアへの要求を抑えるためのものです。スナップショットは変更不可なので、ストアのキーと値を変えても影響しません（別のスナップショットに切り替える）。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/enable-dynamic-configuration-python
+    - https://learn.microsoft.com/azure/azure-app-configuration/concept-snapshots
+
+- id: m-appcfg-what-where
+  objective: "4.2"
+  type: match
+  difficulty: 2
+  tags: [app-configuration, key-vault]
+  question: |
+    次の情報を、どこに保存するのが適切かを対応付けてください。
+  pairs:
+    - left: "LLM のデプロイ名と温度パラメーター"
+      right: "App Configuration のキーと値"
+    - left: "外部 API のアクセス キー"
+      right: "Key Vault のシークレット（App Configuration からは Key Vault 参照）"
+    - left: "新しい再ランク付け機能のオン / オフ"
+      right: "App Configuration の機能フラグ"
+    - left: "CMK に使う暗号化キー"
+      right: "Key Vault のキー"
+  explanation: |
+    機密でない設定と機能フラグは App Configuration、シークレットや暗号鍵・証明書は Key Vault に置きます。App Configuration の Key Vault 参照を使うと、アプリは 1 つの読み込み処理で両方を扱えます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-app-configuration/overview
+    - https://learn.microsoft.com/azure/azure-app-configuration/use-key-vault-references-dotnet-core
