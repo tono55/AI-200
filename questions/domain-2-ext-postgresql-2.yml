@@ -1,0 +1,637 @@
+# 分野 2 追加問題（2 周目）: Azure Database for PostgreSQL（2.5〜2.10）
+
+# ---------- 2.5 ----------
+- id: d-pg-psycopg-commit
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, python, transactions]
+  question: |
+    psycopg 3 で次のように埋め込みを挿入しましたが、別の接続から確認するとデータが入っていません。エラーは出ていません。原因として最も可能性が高いものはどれですか。
+
+    ```python
+    conn = psycopg.connect(conninfo)
+    conn.execute("INSERT INTO chunks (content, embedding) VALUES (%s, %s)", (text, emb))
+    # ここで処理が終わり、プロセスが終了する
+    ```
+  options:
+    - "psycopg は既定で自動コミットではないため、`commit()` していない（または `with psycopg.connect(...) as conn:` のブロックを使っていない）"
+    - "pgvector が有効になっていない"
+    - "INSERT にはベクトル インデックスが必要"
+    - "別の接続からは常に 1 時間後にしか見えない"
+  answer: A
+  explanation: |
+    psycopg の接続は既定でトランザクションを開始し、`commit()` するまで確定しません。`with psycopg.connect(...) as conn:` を使うと、ブロックが例外なく終わったときにコミットされます（例外ならロールバック）。
+  refs:
+    - https://www.psycopg.org/psycopg3/docs/basic/transactions.html
+
+- id: d-pg-vector-literal
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, pgvector, sql]
+  question: |
+    pgvector の型アダプターを使わずに、Python のリスト `[0.12, -0.03, ...]` を SQL のパラメーターとして渡してベクトル検索したいです。最も適切な書き方はどれですか。
+  options:
+    - "リストを `'[0.12,-0.03,...]'` 形式の文字列にして渡し、SQL で `%s::vector` とキャストする"
+    - "リストを JSON にして `%s::jsonb` で渡す"
+    - "リストの各要素を別々のパラメーターにする"
+    - "ベクトルは SQL に渡せないので、サーバー側で生成するしかない"
+  answer: A
+  explanation: |
+    pgvector の `vector` 型はテキスト表現 `'[1,2,3]'` から変換できます。アダプター（`register_vector`）を使えば numpy 配列のまま渡せますが、使わない場合は文字列にしてキャストします。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-server-cursor
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, python, memory]
+  question: |
+    バッチ処理で、500 万行のチャンクを読みながら再埋め込みします。`cur.execute("SELECT id, content FROM chunks")` のあと `fetchall()` すると、ワーカーのメモリが不足します。最も適切な読み方はどれですか。
+  options:
+    - "名前付きカーソル（サーバー側カーソル）でストリーミングし、`fetchmany()` などで少しずつ処理する（またはキー範囲でページングする）"
+    - "`fetchall()` の前に `sleep` する"
+    - "`work_mem` を増やす"
+    - "読み取りを 1 行ずつ新しい接続で行う"
+  answer: A
+  explanation: |
+    通常のカーソルは結果をクライアントにすべて転送します。名前付きカーソル（サーバー側カーソル）を使うとサーバー側に結果を保持し、少しずつ取得できます。キー（`id`）の範囲で区切って取得する方法も一般的です。
+  refs:
+    - https://www.psycopg.org/psycopg3/docs/advanced/cursors.html
+
+- id: d-pg-entra-group
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, entra-id, groups]
+  question: |
+    データ分析チーム 20 人に、PostgreSQL の読み取り専用アクセスを Entra ID で与えたいです。メンバーの増減のたびにデータベースのロールを作り直したくありません。最も適切な方法はどれですか。
+  options:
+    - "Entra グループのプリンシパルを `pgaadauth_create_principal('<グループ名>', false, false)` で作成して読み取り権限を付与し、メンバーはグループ経由で接続する"
+    - "全員で 1 つのパスワード ユーザーを共有する"
+    - "全員を Entra 管理者にする"
+    - "メンバーごとにパスワード ユーザーを作る"
+  answer: A
+  explanation: |
+    Azure Database for PostgreSQL は Entra グループをロールとして作成でき、グループのメンバーがそのグループの権限で接続できます（グループ同期の設定も可能）。メンバー管理は Entra 側で行えます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/security/security-entra-configure
+    - https://learn.microsoft.com/azure/postgresql/security/security-manage-entra-users
+
+- id: d-pg-cli-token
+  objective: "2.5"
+  type: single
+  difficulty: 2
+  tags: [postgresql, entra-id, cli]
+  question: |
+    開発者が手元の `psql` から、自分の Entra ID でフレキシブル サーバーに接続したいです。パスワードとして何を入力しますか。
+  options:
+    - "`az account get-access-token --resource-type oss-rdbms` で取得したアクセス トークン"
+    - "Azure ポータルのログイン パスワード"
+    - "サーバーの管理者パスワード"
+    - "`az account show` の出力"
+  answer: A
+  explanation: |
+    Entra 認証では、`oss-rdbms`（`https://ossrdbms-aad.database.windows.net`）向けのアクセス トークンをパスワードとして使います。ユーザー名は Entra のユーザー プリンシパル名（データベースにロールとして作成済みのもの）です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/security/security-entra-configure
+
+- id: d-pg-async-pool
+  objective: "2.5"
+  type: single
+  difficulty: 3
+  tags: [postgresql, python, async]
+  question: |
+    FastAPI（非同期）のエンドポイントで、同期版の psycopg の接続を使ってベクトル検索をしています。同時アクセスが増えると、DB の待ち時間の間にイベント ループが止まり、他のリクエストも遅くなります。最も適切な改善はどれですか。
+  options:
+    - "非同期ドライバー（psycopg の `AsyncConnection` / `AsyncConnectionPool` など）を使い、`await` で DB を待つ"
+    - "ワーカー プロセスを 1 つにする"
+    - "HNSW の `ef_search` を下げる"
+    - "PostgreSQL の `max_connections` を減らす"
+  answer: A
+  explanation: |
+    非同期フレームワークで同期の I/O を呼ぶと、その間イベント ループがブロックされます。非同期ドライバーと非同期プールを使うと、DB を待つ間に他のリクエストを処理できます。
+  refs:
+    - https://www.psycopg.org/psycopg3/docs/advanced/async.html
+
+# ---------- 2.6 ----------
+- id: d-pg-composite-btree
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, index, btree]
+  question: |
+    チャンクの検索では常に `tenant_id = $1` で絞り、さらに `created_at` の範囲（直近 90 日など）で絞ります。B-tree の複合インデックスの列の順序として最も適切なものはどれですか。
+  options:
+    - "`(tenant_id, created_at)`（等価条件の列を先、範囲条件の列を後）"
+    - "`(created_at, tenant_id)`"
+    - "`tenant_id` と `created_at` に別々の単一列インデックスだけ"
+    - "`(embedding, tenant_id)`"
+  answer: A
+  explanation: |
+    複合 B-tree インデックスは先頭の列から順に使われます。等価条件の列を先にすると、その値の範囲の中で次の列（範囲条件）を効率よく絞れます。
+  refs:
+    - https://www.postgresql.org/docs/current/indexes-multicolumn.html
+
+- id: d-pg-tags-array
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, array, gin]
+  question: |
+    チャンクに複数のタグ（`faq`、`setup`、`billing` など）を持たせ、「いずれかのタグを含む」条件で高速に絞り込みたいです。スキーマとインデックスとして最も適切なものはどれですか。
+  options:
+    - "`tags text[]` 列に GIN インデックスを作り、`WHERE tags && ARRAY['faq','setup']` で検索する"
+    - "タグをカンマ区切りの `text` にして `LIKE '%faq%'` で検索する"
+    - "タグごとに `boolean` 列を 100 個作る"
+    - "`tags` 列に HNSW インデックスを作る"
+  answer: A
+  explanation: |
+    配列型の重なり（`&&`）や包含（`@>`）は GIN インデックスで高速化できます。カンマ区切り文字列と `LIKE` はインデックスが効かず、誤一致（`faq2` など）も起きます。
+  refs:
+    - https://www.postgresql.org/docs/current/gin.html
+    - https://www.postgresql.org/docs/current/functions-array.html
+
+- id: d-pg-brin
+  objective: "2.6"
+  type: single
+  difficulty: 3
+  tags: [postgresql, index, brin]
+  question: |
+    会話ログのテーブル（数十億行）は `created_at` の昇順で追記されるだけで、更新はありません。期間で絞り込むクエリが多いです。インデックスのサイズを極小に抑えたいとき、`created_at` に最も適したインデックスはどれですか。
+  options:
+    - "BRIN インデックス"
+    - "HNSW インデックス"
+    - "GIN インデックス"
+    - "インデックスは不要"
+  answer: A
+  explanation: |
+    BRIN（Block Range Index）は、物理的な並びと値の相関が高い列（追記される時刻など）で、ブロック範囲ごとの最小値・最大値だけを持つ非常に小さなインデックスです。B-tree より大幅に小さく、範囲検索に向いています。
+  refs:
+    - https://www.postgresql.org/docs/current/brin.html
+
+- id: d-pg-dimension-mismatch
+  objective: "2.6"
+  type: single
+  difficulty: 2
+  tags: [postgresql, pgvector, schema]
+  question: |
+    `embedding vector(1536)` 列に、別のモデルで作った 1024 次元のベクトルを挿入しようとするとエラーになります。2 つのモデルの埋め込みを同じ文書について保持したい場合の設計として最も適切なものはどれですか。
+  options:
+    - "モデルごとに別の列（例: `embedding_small vector(1536)`、`embedding_e5 vector(1024)`）または別テーブルにし、それぞれにインデックスを作る"
+    - "1024 次元のベクトルの末尾を 0 で埋めて 1536 次元にする"
+    - "`vector` の次元指定を外し、異なる次元を同じ列で比較する"
+    - "両方を `jsonb` に入れて比較する"
+  answer: A
+  explanation: |
+    次元を指定した `vector(n)` 列には同じ次元のベクトルしか入りません。異なるモデルの埋め込みは比較できない別の空間なので、列やテーブルを分け、クエリも同じモデルの列で行います。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-schema-facts
+  objective: "2.6"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, schema]
+  question: |
+    RAG 用の PostgreSQL スキーマについて、次の記述が正しいかを答えてください。
+  statements:
+    - text: "チャンクの本文を `text` 型にしても、`varchar(n)` と比べて性能上の不利はほとんどない。"
+      answer: true
+    - text: "日時は、タイムゾーンの扱いを明確にするため `timestamptz` を使うのが一般的である。"
+      answer: true
+    - text: "主キーに `bigint GENERATED ALWAYS AS IDENTITY` を使うと、値を自動採番できる。"
+      answer: true
+    - text: "ベクトル列には主キー制約が必須である。"
+      answer: false
+  explanation: |
+    PostgreSQL では `text` と `varchar` の性能差はほぼなく、長さ制限が必要なときだけ `varchar(n)` や CHECK 制約を使います。主キーは ID 列に付け、ベクトル列に制約は不要です。
+  refs:
+    - https://www.postgresql.org/docs/current/datatype-character.html
+    - https://www.postgresql.org/docs/current/datatype-datetime.html
+
+# ---------- 2.7 ----------
+- id: d-pg-index-progress
+  objective: "2.7"
+  type: single
+  difficulty: 2
+  tags: [postgresql, index, monitoring]
+  question: |
+    大きなテーブルで HNSW インデックスを作成中です。どこまで進んだかを確認したいとき、どのビューを参照しますか。
+  options:
+    - "`pg_stat_progress_create_index`"
+    - "`pg_stat_activity` の `query` 列だけ"
+    - "`pg_indexes`"
+    - "`information_schema.tables`"
+  answer: A
+  explanation: |
+    `pg_stat_progress_create_index` でインデックス作成のフェーズや処理済みのタプル数を確認できます（pgvector の README でも紹介されています）。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://www.postgresql.org/docs/current/progress-reporting.html
+
+- id: d-pg-hnsw-m
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, hnsw]
+  question: |
+    HNSW インデックスを `m = 16`（既定）から `m = 48` にして作り直すことを検討しています。予想される影響として正しいものはどれですか。
+  options:
+    - "リコールが上がりやすい一方、インデックスのサイズ（メモリ）とビルド時間が増える"
+    - "インデックスが小さくなり、ビルドが速くなる"
+    - "検索結果は総当たりと完全に一致するようになる"
+    - "IVFFlat に自動で切り替わる"
+  answer: A
+  explanation: |
+    `m` は各ノードが持つ近傍リンクの最大数です。大きくするとグラフが密になってリコールが上がる傾向がありますが、メモリ・ディスクの使用量とビルド時間が増えます。まずは `ef_search` の調整など、コストの小さい方法から試します。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-binary-quantization
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgvector, quantization]
+  question: |
+    数千万件の 1536 次元ベクトルで、HNSW インデックスがメモリに収まらず遅いです。精度を大きく落とさずに計算とメモリを減らす pgvector の手法として最も適切なものはどれですか。
+  options:
+    - "2 値量子化（`binary_quantize(embedding)::bit(1536)` の式インデックスとハミング距離）で候補を多めに取り、元のベクトルで再ランク付けする"
+    - "`ef_search` を最大にする"
+    - "インデックスを削除して総当たりにする"
+    - "`vector` を `text` に変える"
+  answer: A
+  explanation: |
+    2 値量子化は各次元を 1 ビットにしてインデックスを大幅に小さくし、ハミング距離で高速に候補を絞ります。精度の低下は、候補を元の高精度ベクトルで**再ランク付け**して補います。`halfvec` による半精度化も選択肢です。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-diskann
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, diskann]
+  question: |
+    Azure Database for PostgreSQL で、1 億件を超えるベクトルを扱う予定です。メモリにすべてのグラフを載せずに高速・高精度な近似検索をしたいです。Azure で提供されている選択肢として最も適切なものはどれですか。
+  options:
+    - "`pg_diskann` 拡張機能の DiskANN インデックス（`USING diskann`）"
+    - "IVFFlat の `lists = 1`"
+    - "B-tree インデックス"
+    - "GIN インデックス"
+  answer: A
+  explanation: |
+    DiskANN は Microsoft Research のアルゴリズムで、ディスク上のデータ構造と量子化により、大規模なデータでも高速・高精度な検索を実現します。Azure Database for PostgreSQL では `pg_diskann` 拡張機能で使えます（`azure.extensions` での許可が必要）。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-use-pgdiskann
+
+- id: d-pg-vacuum
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, vacuum, index]
+  question: |
+    毎晩、全チャンクの約 30% の埋め込みを更新（UPDATE）しています。数週間でテーブルとインデックスのサイズが増え続け、検索も遅くなってきました。最も可能性の高い原因と対処はどれですか。
+  options:
+    - "UPDATE で古い行のバージョン（デッド タプル）が溜まり、肥大化している。autovacuum の設定を見直し、必要なら `VACUUM` やインデックスの再構築（`REINDEX CONCURRENTLY`）を行う"
+    - "pgvector は UPDATE に対応していない"
+    - "`ef_search` が小さすぎる"
+    - "PgBouncer が無効になっている"
+  answer: A
+  explanation: |
+    PostgreSQL の UPDATE は新しい行のバージョンを作り、古いものは VACUUM で回収されるまで残ります。大量更新では autovacuum が追いつかず、テーブルやインデックスが肥大化することがあります。
+  refs:
+    - https://www.postgresql.org/docs/current/routine-vacuuming.html
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+- id: d-pg-explain-reading
+  objective: "2.7"
+  type: single
+  difficulty: 3
+  tags: [postgresql, explain]
+  question: |
+    ベクトル検索の `EXPLAIN ANALYZE` の結果が次のようでした。この計画について正しい説明はどれですか。
+
+    ```text
+    Limit (actual time=812.3..812.4 rows=5)
+      -> Sort (actual time=812.3..812.3 rows=5)
+           Sort Key: ((embedding <=> '[...]'::vector))
+           -> Seq Scan on chunks (actual time=0.02..640.1 rows=1200000)
+    ```
+  options:
+    - "ベクトル インデックスが使われず、全行の距離を計算して並べ替えている（演算子クラスの不一致、インデックスがない、クエリの形などを確認する）"
+    - "HNSW インデックスが正しく使われている"
+    - "B-tree インデックスで絞り込んでいる"
+    - "結果が 5 件なので最適な計画である"
+  answer: A
+  explanation: |
+    `Seq Scan` と `Sort` は、全行を読んで距離を計算し並べ替えていることを示します。インデックスが使われていれば `Index Scan using <インデックス名>` が表示されます。
+  refs:
+    - https://github.com/pgvector/pgvector
+    - https://www.postgresql.org/docs/current/using-explain.html
+
+# ---------- 2.8 ----------
+- id: d-pg-storage-shrink
+  objective: "2.8"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, storage, scale]
+  question: |
+    Azure Database for PostgreSQL フレキシブル サーバーのリソース変更について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "ストレージのサイズは増やせるが、増やした後に小さくすることはできない。"
+      answer: true
+    - text: "コンピューティング層は Burstable・General Purpose・Memory Optimized の間で上下に変更できる。"
+      answer: true
+    - text: "ストレージのサイズを増やすと、ほとんどの場合サーバーの再起動は不要である。"
+      answer: true
+    - text: "vCore 数を変更しても、サーバーは再起動しない。"
+      answer: false
+  explanation: |
+    ストレージは拡張のみ可能（縮小不可）なので、自動拡張と合わせて計画的に増やします。コンピューティングの変更は再起動を伴います。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/scale/concepts-scaling-resources
+
+- id: d-pg-stop-start
+  objective: "2.8"
+  type: single
+  difficulty: 2
+  tags: [postgresql, cost]
+  question: |
+    検証用の PostgreSQL サーバー（General Purpose）は平日の日中しか使いません。データは残したまま、夜間と週末のコンピューティング費用を抑えたいです。最も適切な方法はどれですか。
+  options:
+    - "サーバーを停止する（停止中はコンピューティングの課金が止まる。停止は最大 7 日で自動的に再開される）"
+    - "毎晩サーバーを削除して、朝に復元する"
+    - "Memory Optimized に変更する"
+    - "ストレージを縮小する"
+  answer: A
+  explanation: |
+    フレキシブル サーバーは停止・開始でき、停止中はコンピューティングの課金が止まります（ストレージは課金される）。停止したままにできるのは 7 日間までで、それを過ぎると自動で起動します。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/overview
+
+- id: d-pg-ha-vs-replica
+  objective: "2.8"
+  type: match
+  difficulty: 3
+  tags: [postgresql, high-availability, read-replica]
+  question: |
+    要件に合う機能を対応付けてください。
+  pairs:
+    - left: "ゾーン障害時に自動でフェールオーバーし、接続文字列を変えずに書き込みを続けたい"
+      right: "ゾーン冗長の高可用性（スタンバイ）"
+    - left: "検索などの読み取りクエリの負荷を主サーバーから分散したい"
+      right: "読み取りレプリカ"
+    - left: "書き込みとストレージを複数ノードに分散して水平にスケールしたい"
+      right: "エラスティック クラスター"
+  distractors:
+    - "PgBouncer"
+  explanation: |
+    高可用性のスタンバイは読み取りに使えない待機系で、障害時の継続性のためのものです。読み取りの分散は読み取りレプリカ、書き込みの分散はエラスティック クラスター（シャーディング）です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/scale/concepts-scaling-resources
+    - https://learn.microsoft.com/azure/postgresql/read-replica/concepts-read-replicas
+
+- id: d-pg-cpu-bound
+  objective: "2.8"
+  type: single
+  difficulty: 3
+  tags: [postgresql, compute, cpu]
+  question: |
+    HNSW インデックスはメモリに十分収まっており、ディスク読み取りはほとんどありません。しかし同時に数百の検索が来ると CPU 使用率が 95% に張り付き、遅延が増えます。最も効果的な対処はどれですか。
+  options:
+    - "vCore 数を増やす（スケールアップ）か、読み取りレプリカに検索を分散する。`ef_search` が必要以上に大きくないかも確認する"
+    - "Memory Optimized にしてメモリだけを増やす"
+    - "Premium SSD v2 で IOPS を増やす"
+    - "`maintenance_work_mem` を増やす"
+  answer: A
+  explanation: |
+    距離計算は CPU を使うため、メモリや I/O ではなく CPU がボトルネックになっています。vCore を増やすか、読み取りを分散します。探索候補を増やす `ef_search` は CPU 負荷を増やすので、必要なリコールの範囲で最小にします。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/extensions/how-to-optimize-performance-pgvector
+
+- id: d-pg-query-store
+  objective: "2.8"
+  type: single
+  difficulty: 2
+  tags: [postgresql, monitoring, query-store]
+  question: |
+    スケールアップの前に、どのクエリが CPU や実行時間を多く使っているかを特定したいです。Azure Database for PostgreSQL で最も適切な機能はどれですか。
+  options:
+    - "Query Store（`azure_sys` データベース）や `pg_stat_statements` で、実行回数・合計時間の多いクエリを調べる"
+    - "Application Insights の `customEvents` を見る"
+    - "サーバーを再起動する"
+    - "ストレージを増やす"
+  answer: A
+  explanation: |
+    Query Store はクエリの実行統計と待機の情報を記録します（`azure_sys` データベースに保存）。原因のクエリを特定すれば、インデックスやクエリの改善でスケールアップせずに済むこともあります。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/monitor/concepts-query-store
+
+- id: d-pg-replica-lag
+  objective: "2.8"
+  type: single
+  difficulty: 3
+  tags: [postgresql, read-replica]
+  question: |
+    文書を登録した直後に、その文書が検索結果に出るかを確認する画面があります。検索は読み取りレプリカで行っており、登録直後には見つからないことがあります。最も適切な対処はどれですか。
+  options:
+    - "登録直後の確認など、最新性が必要な読み取りは主サーバーで行い、遅れを許容できる検索だけをレプリカに送る（レプリカ ラグを監視する）"
+    - "読み取りレプリカを同期レプリケーションに変える"
+    - "HNSW インデックスを削除する"
+    - "レプリカの `ef_search` を上げる"
+  answer: A
+  explanation: |
+    読み取りレプリカは非同期レプリケーションのため、必ず遅延（レプリカ ラグ）があります。read-your-writes が必要な読み取りは主サーバーに送ります。Read Replica Lag メトリックで遅延を監視できます。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/read-replica/concepts-read-replicas
+
+# ---------- 2.9 ----------
+- id: d-pg-chunking
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [rag, chunking]
+  question: |
+    マニュアル全章を 1 チャンク（数万文字）として埋め込んだところ、具体的な質問に対して関連する章がうまく上位に来ません。改善策として最も適切なものはどれですか。
+  options:
+    - "見出しや段落の単位で適度なサイズのチャンクに分割し、前後に少し重なり（オーバーラップ）を持たせて文脈が切れないようにする"
+    - "チャンクをさらに大きくする"
+    - "埋め込みの次元を減らす"
+    - "`LIMIT` を 1 にする"
+  answer: A
+  explanation: |
+    大きすぎるチャンクは多くの話題を含み、埋め込みが平均化されて特定の質問との類似度が下がります。意味のまとまり（見出し・段落）ごとに適度なサイズに分け、境界で文脈が切れないよう重なりを持たせるのが一般的です。
+  refs:
+    - https://learn.microsoft.com/azure/search/vector-search-how-to-chunk-documents
+    - https://learn.microsoft.com/azure/postgresql/azure-ai/generative-ai-overview
+
+- id: d-pg-recency-filter
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [postgresql, rag, filter]
+  question: |
+    社内規程の RAG で、改定前の古い規程が検索に出てきてしまいます。各チャンクには `effective_from`（施行日）と `superseded`（廃止フラグ）があります。最も適切な検索の SQL の方針はどれですか。
+  options:
+    - "`WHERE superseded = false AND effective_from <= now()` で有効な規程に絞り込んだうえで、`ORDER BY embedding <=> $1 LIMIT k` で検索する"
+    - "類似度の上位 k 件を取得してから、LLM に「古い規程は無視して」と指示する"
+    - "廃止された規程の埋め込みを 0 にする"
+    - "`ef_search` を上げる"
+  answer: A
+  explanation: |
+    検索対象を業務ルール（有効期間・状態）で絞り込むのは、メタデータ フィルターの典型的な使い方です。検索後に LLM に任せると、上位がすべて古い規程だった場合に正しい根拠を渡せません。
+  refs:
+    - https://github.com/pgvector/pgvector
+
+- id: d-pg-citations
+  objective: "2.9"
+  type: single
+  difficulty: 2
+  tags: [rag, citations]
+  question: |
+    RAG の回答に、根拠となった文書名とページ番号を必ず表示したいです。PostgreSQL のスキーマと検索で準備すべきことはどれですか。
+  options:
+    - "チャンクに `document_id`、ページ番号、見出しなどの出典情報を持たせ、検索結果と一緒に取得してプロンプトと画面に渡す"
+    - "LLM に出典を推測させる"
+    - "埋め込みにページ番号を含める"
+    - "出典はベクトル検索では扱えない"
+  answer: A
+  explanation: |
+    出典の表示は、検索したチャンクのメタデータをそのまま使うのが確実です。LLM に推測させると誤った出典（ハルシネーション）を表示する可能性があります。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/azure-ai/generative-ai-overview
+
+- id: d-pg-token-budget
+  objective: "2.9"
+  type: single
+  difficulty: 3
+  tags: [rag, top-k, context]
+  question: |
+    検索で上位 30 件のチャンクをすべて LLM のプロンプトに入れていたところ、コストが高く、回答も的外れになることが増えました。最も適切な改善はどれですか。
+  options:
+    - "上位 k を減らすか、多めに取得した候補を再ランク付けして関連度の高いものだけを入れる。類似度のしきい値で低いものを除外することも検討する"
+    - "チャンクのサイズを大きくして件数を増やす"
+    - "すべての文書をプロンプトに入れる"
+    - "埋め込みを毎回作り直す"
+  answer: A
+  explanation: |
+    関連の薄いチャンクはノイズになり、トークン コストも増えます。取得件数、再ランク付け、しきい値で、プロンプトに入れる文脈を絞るのが RAG の基本的な調整です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/azure-ai/generative-ai-overview
+
+- id: d-pg-semantic-vs-lexical
+  objective: "2.9"
+  type: yesno
+  difficulty: 2
+  tags: [rag, semantic-search]
+  question: |
+    PostgreSQL でのセマンティック検索（ベクトル）とキーワード検索（全文検索）について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "ベクトル検索は、言い回しが違っても意味の近い文書を見つけやすい。"
+      answer: true
+    - text: "型番やエラー コードの完全一致は、全文検索（`tsvector`）の方が確実に見つけやすい。"
+      answer: true
+    - text: "ベクトル検索を使う場合、`tsvector` の列やインデックスは作成できない。"
+      answer: false
+  explanation: |
+    両者は得意分野が違うため、1 つのテーブルにベクトル列と `tsvector` 列を持たせ、ハイブリッド検索（RRF などで統合）にするのが効果的です。
+  refs:
+    - https://www.postgresql.org/docs/current/textsearch-intro.html
+    - https://github.com/pgvector/pgvector
+
+# ---------- 2.10 ----------
+- id: d-pg-prepare-threshold
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, pgbouncer, prepared-statements]
+  question: |
+    psycopg 3 から組み込み PgBouncer（transaction モード）経由で接続したところ、同じクエリを何回か実行した後に `prepared statement "_pg3_0" does not exist` のようなエラーが出るようになりました。最も適切な対処はどれですか。
+  options:
+    - "psycopg の自動プリペア（`prepare_threshold`）を無効（`None`）にするか、PgBouncer の `pgbouncer.max_prepared_statements` を 0 より大きくしてプリペアド ステートメントを追跡させる"
+    - "PgBouncer のポートを 5432 にする"
+    - "クエリにセミコロンを付ける"
+    - "`hnsw.ef_search` を上げる"
+  answer: A
+  explanation: |
+    psycopg 3 は同じクエリを一定回数実行すると、サーバー側でプリペアド ステートメントを作ります。transaction モードでは次のトランザクションが別のサーバー接続になるため、そのステートメントが存在しないことがあります。クライアントのプリペアを無効にするか、PgBouncer に追跡させます。
+  refs:
+    - https://www.psycopg.org/psycopg3/docs/advanced/prepare.html
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-pgbouncer
+
+- id: d-pg-virtual-endpoint
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, read-replica, endpoints]
+  question: |
+    読み取りレプリカを使っています。災害時にレプリカを昇格（promote）しても、アプリの接続文字列を書き換えずに「書き込み用」と「読み取り用」の接続先を保ちたいです。最も適切な機能はどれですか。
+  options:
+    - "読み取りレプリカの仮想エンドポイント（書き込み用・読み取り用のエンドポイント）を使う"
+    - "レプリカの IP アドレスを接続文字列に書く"
+    - "PgBouncer のポートを 8432 にする"
+    - "主サーバーとレプリカで同じサーバー名を付ける"
+  answer: A
+  explanation: |
+    仮想エンドポイントは、書き込み（プライマリ）と読み取り（レプリカ）を指す固定のエンドポイントで、スイッチオーバー後も自動で正しいサーバーを指します。アプリの接続文字列を変える必要がありません。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/read-replica/concepts-read-replicas
+
+- id: d-pg-statement-timeout
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, timeout, connections]
+  question: |
+    まれに、インデックスが使われない重い検索クエリが数分間実行され、その間プールの接続を占有して他のリクエストが接続待ちになります。データベース側で被害を限定する設定として最も適切なものはどれですか。
+  options:
+    - "アプリ用のロール（またはセッション）に `statement_timeout` を設定し、一定時間を超えたクエリを打ち切る"
+    - "`max_connections` を 1 にする"
+    - "PgBouncer の `default_pool_size` を 5000 にする"
+    - "クエリの `LIMIT` を外す"
+  answer: A
+  explanation: |
+    `statement_timeout` を超えたクエリはキャンセルされ、接続が解放されます。アプリのロールに設定すれば、管理用のバッチなど他の用途に影響しません。あわせて、遅いクエリの原因（インデックスが使われていない）を直します。
+  refs:
+    - https://www.postgresql.org/docs/current/runtime-config-client.html
+
+- id: d-pg-idle-connections
+  objective: "2.10"
+  type: yesno
+  difficulty: 2
+  tags: [postgresql, connections]
+  question: |
+    PostgreSQL の接続について、次の記述が正しいかを答えてください。
+  statements:
+    - text: "アイドル状態の接続も、サーバー側のプロセスとメモリを消費する。"
+      answer: true
+    - text: "アプリ側の接続プールには、最大サイズだけでなくアイドル接続の上限やタイムアウトも設定するとよい。"
+      answer: true
+    - text: "PgBouncer を使うと、アプリからの接続数よりも PostgreSQL への実接続数を少なく保てる。"
+      answer: true
+    - text: "接続数が多いほど、常にスループットは上がる。"
+      answer: false
+  explanation: |
+    PostgreSQL は 1 接続 = 1 プロセスのため、接続が多すぎるとコンテキスト切り替えやメモリで逆に遅くなります。適切な数の接続を使い回すのが基本です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices
+
+- id: d-pg-bouncer-or-app-pool
+  objective: "2.10"
+  type: single
+  difficulty: 3
+  tags: [postgresql, connection-pool]
+  question: |
+    少数の長時間稼働するコンテナー（3 レプリカ）で動く API から PostgreSQL に接続しています。各レプリカは適切なサイズのアプリ側の接続プールを持ち、合計接続数は 60 程度で安定しています。この状況での判断として最も適切なものはどれですか。
+  options:
+    - "アプリ側のプールで十分機能しているため、必ずしも PgBouncer は必要ない。インスタンス数が大きく変動するサーバーレスや多数のクライアントがある場合に PgBouncer の効果が大きい"
+    - "どんな場合でも PgBouncer を使わないと接続できない"
+    - "アプリ側のプールを外し、毎回接続し直す方がよい"
+    - "`max_connections` を 10 にする"
+  answer: A
+  explanation: |
+    接続プールの目的は、接続の確立コストを減らし、接続数を適切に保つことです。長時間稼働する少数のプロセスなら、アプリ側のプールで十分なことが多いです。短命なプロセスや大量のクライアントがある場合は、サーバー側で多重化する PgBouncer が有効です。
+  refs:
+    - https://learn.microsoft.com/azure/postgresql/connectivity/concepts-connection-pooling-best-practices
