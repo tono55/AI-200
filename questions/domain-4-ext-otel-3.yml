@@ -1,0 +1,403 @@
+# 分野 4 追加問題（3 周目）: OpenTelemetry（4.3）
+
+- id: m-otel-traceparent
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, w3c-trace-context, propagation]
+  question: |
+    API からワーカーへの HTTP 要求に、次のヘッダーが付いていました。
+    `traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
+    この値について正しい説明はどれですか。
+  options:
+    - "`4bf92f...4736` がトレース ID、`00f067aa0ba902b7` が呼び出し元（親）のスパン ID、末尾の `01` はサンプリングされていることを示す"
+    - "`4bf92f...4736` がスパン ID、`00f067aa0ba902b7` がトレース ID である"
+    - "末尾の `01` は、再試行の回数を示す"
+    - "このヘッダーにはユーザー ID が含まれている"
+  answer: A
+  explanation: |
+    W3C Trace Context の `traceparent` は「バージョン - トレース ID（32 桁）- 親スパン ID（16 桁）- フラグ」の形式です。受け取った側は同じトレース ID で子スパンを作り、親スパン ID で親子関係をつなぎます。フラグの `01` は呼び出し元でサンプリングされたことを示し、親に従うサンプラーは同じ判断を引き継ぎます。業務データは `baggage` ヘッダーで別に運びます。
+  refs:
+    - https://www.w3.org/TR/trace-context/
+    - https://learn.microsoft.com/azure/azure-monitor/app/distributed-trace-data
+
+- id: m-otel-manual-propagation
+  objective: "4.3"
+  type: dropdown
+  difficulty: 3
+  tags: [opentelemetry, propagation, python, messaging]
+  question: |
+    自動計装に対応していない社内のメッセージ キューを使っています。送信側でトレース コンテキストをメッセージのヘッダーに入れ、受信側で取り出して同じトレースの子スパンにします。コードを完成させてください。
+  language: python
+  template: |
+    from opentelemetry import propagate, trace
+    tracer = trace.get_tracer(__name__)
+
+    # 送信側
+    headers = {}
+    propagate.{{1}}(headers)
+    queue.send(body, headers=headers)
+
+    # 受信側
+    ctx = propagate.{{2}}(msg.headers)
+    with tracer.start_as_current_span("process job", context=ctx,
+                                      kind=trace.SpanKind.{{3}}):
+        handle(msg)
+  blanks:
+    "1":
+      options: ["inject", "extract", "set_span", "attach"]
+      answer: "inject"
+    "2":
+      options: ["extract", "inject", "get_current", "detach"]
+      answer: "extract"
+    "3":
+      options: ["CONSUMER", "SERVER", "CLIENT", "INTERNAL"]
+      answer: "CONSUMER"
+  explanation: |
+    送信側は現在のコンテキストを `propagate.inject()` でキャリア（ヘッダーの辞書）に書き込み、受信側は `propagate.extract()` で取り出して、スパンの親として渡します。メッセージを受信して処理するスパンの種類は CONSUMER（送信側は PRODUCER）です。これでキューをまたいでも 1 つのトレースとしてつながります。
+  refs:
+    - https://opentelemetry.io/docs/languages/python/propagation/
+    - https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/
+
+- id: m-otel-baggage
+  objective: "4.3"
+  type: yesno
+  difficulty: 3
+  tags: [opentelemetry, baggage, propagation]
+  question: |
+    API で認証したテナント ID を、下流のワーカーや検索サービスでも使いたいので、OpenTelemetry の Baggage に `tenant.id` を設定しました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "Baggage は `baggage` ヘッダーなどで、トレース コンテキストと一緒に下流のサービスに伝播される。"
+      answer: true
+    - text: "Baggage に入れた値は、自動的にすべてのスパンの属性として記録される。"
+      answer: false
+    - text: "Baggage は外部のサービスにも送られる可能性があるため、機密情報を入れてはいけない。"
+      answer: true
+  explanation: |
+    Baggage はサービス間でキーと値を受け渡す仕組みで、スパンの属性とは別物です。スパンに記録したいなら、受け取った側で属性に設定するか、Baggage の値を属性にコピーするスパン プロセッサーを使います。HTTP ヘッダーとして伝播されるので、外部の呼び出し先にも渡りうることに注意します。
+  refs:
+    - https://opentelemetry.io/docs/concepts/signals/baggage/
+
+- id: m-otel-span-processor
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, span-processor, azure-monitor]
+  question: |
+    すべてのスパン（自動計装のスパンを含む）に、現在のテナント ID を属性 `app.tenant_id` として付けたいです。個々の計装コードは変更したくありません。Azure Monitor OpenTelemetry Distro（Python）での方法として最も適切なものはどれですか。
+  options:
+    - "`on_start` で属性を設定するカスタム SpanProcessor を作り、`configure_azure_monitor(span_processors=[...])` で登録する"
+    - "すべての関数の先頭で `span.set_attribute()` を呼ぶ"
+    - "Application Insights のサンプリングを無効にする"
+    - "`OTEL_SERVICE_NAME` にテナント ID を設定する"
+  answer: A
+  explanation: |
+    **スパン プロセッサー**は、スパンの開始時（`on_start`）と終了時（`on_end`）に呼ばれるので、すべてのスパンに共通の属性を付けたり、不要な属性を取り除いたりするのに使えます。Distro では `span_processors` で登録します。`service.name` はサービスを表すリソース属性で、要求ごとの値には使いません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify#add-span-attributes
+
+- id: m-otel-exclude-health
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, instrumentation, health-probes, cost]
+  question: |
+    Container Apps のヘルス プローブ（`/healthz`）が数秒ごとに API を呼ぶため、Application Insights の `requests` の大半がこの要求で占められ、コストも増えています。プローブの要求を記録しないようにする方法として、最も適切なものはどれですか（Python、FastAPI の自動計装）。
+  options:
+    - "環境変数 `OTEL_PYTHON_EXCLUDED_URLS`（または `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`）に `healthz` を指定し、計装の対象から外す"
+    - "サンプリング率を 1% にする"
+    - "ヘルス プローブを無効にする"
+    - "Application Insights のデータ保持期間を短くする"
+  answer: A
+  explanation: |
+    Python の HTTP フレームワークの計装は、除外する URL のパターンを環境変数で指定できます。ヘルス プローブなど不要な要求を対象から外せば、重要なテレメトリを間引かずにコストを下げられます。サンプリング率を極端に下げると、本当に見たい要求まで失われます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+    - https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/fastapi/fastapi.html
+
+- id: m-otel-instrument-types
+  objective: "4.3"
+  type: match
+  difficulty: 2
+  tags: [opentelemetry, metrics, instruments]
+  question: |
+    記録したいメトリックと、OpenTelemetry の計測器（instrument）の種類を対応付けてください。
+  pairs:
+    - left: "処理した文書の累計数（増えるだけ）"
+      right: "Counter"
+    - left: "LLM の応答時間の分布（p95 などを見たい）"
+      right: "Histogram"
+    - left: "処理待ちのジョブ数（増えたり減ったりする現在値を、加算・減算で記録する）"
+      right: "UpDownCounter"
+    - left: "キャッシュのメモリ使用量（定期的に現在の値を読み取る）"
+      right: "ObservableGauge"
+  distractors:
+    - "Span"
+  explanation: |
+    単調に増える量は Counter、分布（遅延など）は Histogram、増減する量を差分で記録するなら UpDownCounter、外部から現在値を読み取るなら非同期の ObservableGauge を使います。種類を正しく選ぶと、バックエンドで合計・レート・パーセンタイルなどを正しく集計できます。
+  refs:
+    - https://opentelemetry.io/docs/concepts/signals/metrics/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify#add-custom-metrics
+
+- id: m-otel-metric-cardinality
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, metrics, cardinality, cost]
+  question: |
+    LLM のトークン使用量のカウンターに、属性として `model`、`tenant_id`（200 社）、`user_id`（10 万人）、`request_id` を付けて記録しています。メトリックのコストが急増し、集計クエリも遅くなりました。最も適切な改善はどれですか。
+  options:
+    - "メトリックの属性は値の種類が限られるもの（`model`、`tenant_id` など）に絞り、`user_id` や `request_id` のような値の多いものは外す（必要ならスパンやログに記録する）"
+    - "カウンターをヒストグラムに変える"
+    - "エクスポートの間隔を 1 秒にする"
+    - "属性をすべて 1 つの文字列に連結する"
+  answer: A
+  explanation: |
+    メトリックは**属性の値の組み合わせごと**に時系列が作られるため、ユーザー ID や要求 ID のような値の多い属性を付けると時系列の数が爆発（高カーディナリティ）し、コストと性能に影響します。メトリックには集計の軸として必要な少数の属性だけを付け、個々の要求の情報はスパンに記録します。
+  refs:
+    - https://opentelemetry.io/docs/concepts/signals/metrics/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify#add-custom-metrics
+
+- id: m-otel-live-metrics
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, live-metrics, application-insights]
+  question: |
+    新しいリビジョンへの切り替え中に、要求数・失敗率・CPU などを数秒単位でリアルタイムに確認し、問題があればすぐにロールバックしたいです。Application Insights と Azure Monitor OpenTelemetry Distro で使う機能として最も適切なものはどれですか。
+  options:
+    - "ライブ メトリック（Distro で有効にし、ポータルのライブ メトリックで確認する）"
+    - "Log Analytics で 5 分ごとに KQL を実行する"
+    - "可用性テスト"
+    - "ブック（Workbooks）の月次レポート"
+  answer: A
+  explanation: |
+    **ライブ メトリック**は、ほぼリアルタイム（1 秒程度の遅延）で要求・依存関係・例外・性能カウンターなどを表示し、デプロイ中の監視に向いています。Log Analytics に取り込まれたデータは、取り込みまでに数分の遅延があります。Python の Distro では `enable_live_metrics=True` で有効にします。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/live-stream
+
+- id: m-otel-thread-context
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, context, threads, python]
+  question: |
+    FastAPI のエンドポイントで、重い処理を `ThreadPoolExecutor` に渡して実行しています。そのスレッドの中で作ったスパンが、元の要求のトレースにつながらず、別のトレースとして記録されます。原因と対処として最も適切なものはどれですか。
+  options:
+    - "現在のスパンのコンテキストは `contextvars` に保持されており、スレッド プールには自動で引き継がれない。コンテキストを明示的に渡す（`contextvars.copy_context().run` を使う、`asyncio.to_thread` を使う、threading の計装を入れる）"
+    - "スレッドの中ではスパンを作れない仕様なので、ログだけにする"
+    - "サンプリングによってスパンが別のトレースに移されている"
+    - "`service.name` がスレッドごとに異なるため"
+  answer: A
+  explanation: |
+    OpenTelemetry の Python は、現在のコンテキストを `contextvars` で管理します。新しいスレッドやスレッド プールのタスクにはコンテキストが自動では引き継がれないため、親のないスパン（新しいトレース）になります。コンテキストをコピーして実行するか、コンテキストを引き継ぐ API や計装を使います。
+  refs:
+    - https://opentelemetry.io/docs/languages/python/propagation/
+    - https://docs.python.org/3/library/contextvars.html
+
+- id: m-otel-tail-sampling
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, sampling, collector]
+  question: |
+    トラフィックが多いのでトレースを 10% にサンプリングしていますが、エラーになったトレースや 5 秒以上かかったトレースは必ずすべて残したいです。アプリの SDK のサンプラーだけでは、要求の開始時点では結果がわかりません。最も適切な構成はどれですか。
+  options:
+    - "アプリからはすべてのスパンを OpenTelemetry Collector に送り、Collector のテール サンプリング（tail sampling）でエラーや遅いトレースを残し、それ以外を 10% にする"
+    - "SDK のサンプリング率を 0% にする"
+    - "エラーのときだけアプリを再起動する"
+    - "サンプリングを各サービスでばらばらの率に設定する"
+  answer: A
+  explanation: |
+    SDK のサンプリングは要求の**開始時**に判断する（ヘッド サンプリング）ため、結果（エラーや遅延）に基づいて残すことはできません。トレースが完了してから判断する**テール サンプリング**は、全スパンを集める Collector で行います。ただし Collector の運用（メモリやスケール）が必要になります。サービスごとに率がばらばらだと、トレースが途中で欠けます。
+  refs:
+    - https://opentelemetry.io/docs/concepts/sampling/
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-sampling
+
+- id: m-otel-aca-agent
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, container-apps, managed-agent]
+  question: |
+    Container Apps 環境の 10 個のアプリから、テレメトリを Application Insights と OTLP 対応の別の監視基盤の両方に送りたいです。Collector を自分でデプロイ・運用したくありません。最も適切な方法はどれですか。
+  options:
+    - "Container Apps 環境のマネージド OpenTelemetry エージェントを構成し、送信先（Application Insights と OTLP エンドポイント）を環境で指定する。アプリは OTLP でエージェントに送る（エンドポイントは環境変数で自動的に渡される）"
+    - "各アプリに 2 つのエクスポーターを組み込み、それぞれの接続情報をアプリごとに設定する"
+    - "Log Analytics から別の監視基盤へ毎日 CSV で書き出す"
+    - "各アプリのサイドカーに Collector を手動で追加する"
+  answer: A
+  explanation: |
+    Container Apps には環境レベルの**マネージド OpenTelemetry エージェント**があり、送信先を環境で設定すると、アプリには OTLP のエンドポイントが環境変数で渡されます。アプリは標準の OTLP エクスポーターで送るだけでよく、送信先の追加・変更もアプリを変えずに環境側で行えます。
+  refs:
+    - https://learn.microsoft.com/azure/container-apps/opentelemetry-agents
+
+- id: m-otel-functions-mode
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, functions, host-json]
+  question: |
+    Azure Functions（Python）のアプリから、他のサービスと同じように OpenTelemetry 形式でテレメトリを出し、OTLP の送信先や Application Insights に送りたいです。Functions ホスト側のログやトレースも OpenTelemetry で出力させるには、何を設定しますか。
+  options:
+    - "`host.json` に `\"telemetryMode\": \"OpenTelemetry\"` を設定し、アプリ側でも OpenTelemetry のエクスポーター（Azure Monitor または OTLP）を構成する"
+    - "`FUNCTIONS_WORKER_RUNTIME` を `opentelemetry` にする"
+    - "Functions は OpenTelemetry をサポートしないため、Application Insights SDK だけを使う"
+    - "`local.settings.json` に `OTEL_ENABLED=true` を書く"
+  answer: A
+  explanation: |
+    Functions では `host.json` の `telemetryMode` を `OpenTelemetry` にすると、ホストのテレメトリも OpenTelemetry 形式で出力され、アプリのコードの OpenTelemetry と組み合わせて、関数の実行とアプリ内の処理を 1 つのトレースで扱えます。送信先は Application Insights の接続文字列や OTLP の環境変数で指定します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-functions/opentelemetry-howto
+
+- id: m-otel-entra-ingestion
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, azure-monitor, entra-id]
+  question: |
+    Application Insights でローカル認証を無効にし、Microsoft Entra 認証でのみテレメトリを受け付けるようにしました。Container Apps のアプリ（Azure Monitor OpenTelemetry Distro、Python、ユーザー割り当てマネージド ID）から送り続けるには、どうしますか。
+  options:
+    - "`configure_azure_monitor(connection_string=..., credential=ManagedIdentityCredential(client_id=...))` で資格情報を渡し、その ID に Monitoring Metrics Publisher ロールを付与する"
+    - "接続文字列の `InstrumentationKey` を新しい値に置き換える"
+    - "Application Insights のアクセス キーを環境変数に設定する"
+    - "`OTEL_TRACES_SAMPLER=always_off` にする"
+  answer: A
+  explanation: |
+    Distro は `credential` を受け取り、Entra のトークンでテレメトリを送信します。送信する ID には Application Insights（または Log Analytics ワークスペース）の **Monitoring Metrics Publisher** ロールが必要です。接続文字列は送信先の特定のために引き続き必要で、資格情報の代わりにはなりません。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/azure-ad-authentication
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+
+- id: m-otel-logger-level
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, logging, python]
+  question: |
+    Azure Monitor OpenTelemetry Distro を構成しましたが、アプリの `logger.info(...)` のログが Application Insights の `traces` に記録されません。`logger.warning(...)` は記録されています。最も可能性の高い原因と対処はどれですか。
+  options:
+    - "Python のロガーのレベルが既定の WARNING のままなので、INFO が出力されていない。アプリのロガーのレベルを INFO にする（必要なら `logger_name` で収集するロガーを指定する）"
+    - "Application Insights は INFO のログを受け付けない"
+    - "サンプリングで INFO だけが除外されている"
+    - "`service.name` が設定されていないため"
+  answer: A
+  explanation: |
+    Distro は Python の `logging` からログを収集しますが、ロガーに設定したレベル未満のログはそもそも出力されません。ルート ロガーの既定は WARNING なので、INFO を記録するにはアプリのロガーのレベルを設定します。`logger_name` を指定すると、そのロガー（と子ロガー）のログだけを収集でき、ライブラリの大量のログを除外できます。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify#send-custom-telemetry
+
+- id: m-otel-span-naming
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, span-name, cardinality]
+  question: |
+    手動で作るスパンの名前を `f"GET /docs/{doc_id}"` のように、文書 ID を含めて付けています。Application Insights のパフォーマンス画面で操作ごとに集計しようとすると、操作が数十万種類に分かれてしまい、比較できません。最も適切な修正はどれですか。
+  options:
+    - "スパン名は `GET /docs/{doc_id}` のような**テンプレート**（値を含まない低カーディナリティの名前）にし、文書 ID は属性に記録する"
+    - "スパン名に日時も含めて一意にする"
+    - "スパンを作らず、ログだけにする"
+    - "サンプリング率を下げる"
+  answer: A
+  explanation: |
+    スパン名は集計の単位になるため、具体的な値を含めると種類が爆発します。OpenTelemetry の規約でも、HTTP のスパン名はメソッドとルートのテンプレート（`GET /docs/{doc_id}`）にし、具体的な値は属性に記録することになっています。
+  refs:
+    - https://opentelemetry.io/docs/specs/semconv/http/http-spans/
+    - https://opentelemetry.io/docs/concepts/signals/traces/#spans
+
+- id: m-otel-genai-content
+  objective: "4.3"
+  type: yesno
+  difficulty: 3
+  tags: [opentelemetry, genai, privacy]
+  question: |
+    LLM クライアント ライブラリの OpenTelemetry 計装（生成 AI のセマンティック規約に準拠）を導入しました。次の記述が正しいかを答えてください。
+  statements:
+    - text: "モデル名やトークン数などのメタデータは、スパンの属性として記録される。"
+      answer: true
+    - text: "プロンプトや応答の本文（メッセージの内容）は、既定では記録されず、記録するには設定（環境変数など）で明示的に有効にする必要がある。"
+      answer: true
+    - text: "本番環境では、個人情報が含まれる可能性を考えずに、本文の記録を常に有効にするのが推奨される。"
+      answer: false
+  explanation: |
+    生成 AI の計装は、機密情報の漏えいを避けるため、メッセージの内容の記録を既定で無効にしているものが一般的です。デバッグなどで有効にする場合は、対象の環境や保持期間、アクセス権を限定し、個人情報のマスキングも検討します。
+  refs:
+    - https://opentelemetry.io/docs/specs/semconv/gen-ai/
+    - https://learn.microsoft.com/azure/ai-foundry/how-to/develop/trace-application
+
+- id: m-otel-configure-early
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, azure-monitor, initialization]
+  question: |
+    FastAPI のアプリで、`app = FastAPI()` と各種クライアントを作成した後に `configure_azure_monitor()` を呼んでいます。依存関係（HTTP クライアント）のテレメトリは一部記録されますが、受信した要求（`requests`）が記録されません。最も適切な修正はどれですか。
+  options:
+    - "`configure_azure_monitor()` を、アプリケーションとクライアントを作成する前（起動処理の最初）に呼ぶ"
+    - "サンプリング率を 100% にする"
+    - "`requests` テーブルは FastAPI では使えないので、`traces` を見る"
+    - "`configure_azure_monitor()` を要求ごとに呼ぶ"
+  answer: A
+  explanation: |
+    自動計装は、フレームワークやライブラリのクラス・関数に計装を組み込む（パッチを当てる）ことで動作します。計装を有効にする前に作成されたアプリやクライアントには計装が適用されないことがあるため、テレメトリの構成は起動処理の最初に 1 回だけ行います。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-configuration
+
+- id: m-otel-console-exporter
+  objective: "4.3"
+  type: single
+  difficulty: 2
+  tags: [opentelemetry, local-development, exporter]
+  question: |
+    ローカル開発中に、手動で追加したスパンの属性や親子関係が正しいかを、Azure にデータを送らずにすぐ確認したいです。最も簡単な方法はどれですか。
+  options:
+    - "コンソール エクスポーター（`ConsoleSpanExporter`）を使い、スパンを標準出力に出して確認する"
+    - "本番の Application Insights に送って、数分後に確認する"
+    - "ログ レベルを DEBUG にするだけでよい"
+    - "スパンの代わりに `print` 文を使う"
+  answer: A
+  explanation: |
+    OpenTelemetry の SDK にはコンソール エクスポーターがあり、スパンの名前・属性・トレース ID・親スパン ID などをそのまま出力できます。計装の確認をすばやく行え、本番のテレメトリを汚しません。ローカルで Collector や Jaeger などに OTLP で送って可視化する方法もあります。
+  refs:
+    - https://opentelemetry.io/docs/languages/python/exporters/
+
+- id: m-otel-consistent-sampling
+  objective: "4.3"
+  type: yesno
+  difficulty: 3
+  tags: [opentelemetry, sampling, distributed-tracing]
+  question: |
+    API とワーカーの両方で、Azure Monitor OpenTelemetry Distro のサンプリング率を 25% に設定しています。API がワーカーを呼ぶとき、トレース コンテキストは正しく伝播されています。次の記述が正しいかを答えてください。
+  statements:
+    - text: "サンプリングの判断はトレース ID にもとづいて行われるので、同じトレースは API とワーカーで同じように残る（または捨てられる）。"
+      answer: true
+    - text: "API とワーカーでサンプリング率を変えると、トレースの一部だけが残ることがある。"
+      answer: true
+    - text: "サンプリングされたテレメトリでも、Application Insights の件数の集計（要求数など）は、サンプリング率で補正して推定される。"
+      answer: true
+  explanation: |
+    Application Insights のサンプリングはトレース ID のハッシュで判断するので、同じ率なら分散トレース全体が一貫して残ります。率がサービスごとに違うと、トレースの途中が欠けます。サンプリングされたデータには倍率（itemCount）が記録され、ポータルの集計はそれを使って推定値を出します。
+  refs:
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-sampling
+
+- id: m-otel-metric-export-interval
+  objective: "4.3"
+  type: single
+  difficulty: 3
+  tags: [opentelemetry, metrics, export]
+  question: |
+    バッチ ジョブ（実行時間 20 秒）で、処理件数をカスタム メトリックの Counter に記録していますが、Application Insights の `customMetrics` にほとんど値が届きません。スパンは `force_flush()` を呼ぶようにしてから届くようになりました。最も可能性の高い原因はどれですか。
+  options:
+    - "メトリックは一定の間隔（既定で 60 秒程度）ごとに集計してエクスポートされるため、ジョブがその前に終了している。終了時に MeterProvider も `force_flush()`（または `shutdown()`）する"
+    - "Counter はジョブでは使えない"
+    - "メトリックはサンプリングで捨てられている"
+    - "`customMetrics` には Histogram しか記録されない"
+  answer: A
+  explanation: |
+    メトリックは、SDK の中で一定間隔ごとに集計してまとめて送る（定期的なエクスポート）ため、短時間で終わるプロセスでは送信前に終了してしまいます。トレースと同様に、終了時にメトリックのプロバイダーもフラッシュします。カスタム メトリックはサンプリングの対象外です。
+  refs:
+    - https://opentelemetry.io/docs/specs/otel/metrics/sdk/#periodic-exporting-metricreader
+    - https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-add-modify#add-custom-metrics
